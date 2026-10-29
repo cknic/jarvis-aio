@@ -136,6 +136,19 @@ yet and stay in the panel.
 This is the same lockdown the panel button and the `jarvis.lockdown` service
 drive, so all three stay in step.
 
+### Who can write to the entities
+
+Home Assistant lets **every** user in its default *Users* group call entity
+services; the frontend only hides what you hide. That is deliberate here: the
+switches, selects, number and alarm panel above are the household's write
+surface, the replacement for the admin-only panel, and a non-admin member can
+turn Sentinel off, change the mode, or **disarm the lockdown without a code**
+exactly as they could flip any light. If that is not what you want, Home
+Assistant's own tools apply: put the member in the **read-only** group
+(Settings → People → user → *Administrator* off, *Read only*… shown in
+advanced mode), or simply keep those entities off the dashboards they see. The
+WebSocket write commands the panel uses remain admin-only regardless.
+
 ### Event (read-only)
 
 | Entity id | Fires on | Notes |
@@ -155,13 +168,19 @@ which honour Home Assistant's normal per-user dashboard visibility.
 On the WebSocket side, every write command the panel uses is gated the same way:
 commands that are admin-only in their entirety carry `@require_admin`
 (config writes, lockdown, model listing, floor-plan writes, …), and mixed
-read/write commands (`jarvis/mode`, `jarvis/faces`, `jarvis/voices`,
-`jarvis/mutes`, `jarvis/documents`, `jarvis/intrusion`, `jarvis/energy`,
-`jarvis/hazard`, `jarvis/biometrics`, `jarvis/semantic_search`) answer reads
-for anyone but reply `unauthorized` to a non-admin who tries the write actions.
-Stock cards therefore keep working for everyone; changing JARVIS's behaviour
-needs an admin, or one of the writable entities above (which obey whatever
-access you grant through the dashboard itself).
+read/write commands (`jarvis/mode`, `jarvis/mutes`, `jarvis/intrusion`,
+`jarvis/energy`, `jarvis/hazard`, `jarvis/biometrics`, `jarvis/semantic_search`)
+answer plain status reads for anyone but reply `unauthorized` to a non-admin
+who tries the write actions. `jarvis/faces`, `jarvis/voices` and
+`jarvis/documents` are admin-only in every action, reads included: they
+enumerate biometric data (face frames, the voiceprint roster, on-demand
+speaker identification) or document contents. Two open status reads are
+redacted for non-admins: `jarvis/intrusion status` omits `last_snapshot` (the
+server path, camera and snapshot URL of the latest still) and
+`jarvis/semantic_search status` omits `base` and `model` (the internal
+embedding endpoint). Stock cards therefore keep working for everyone;
+changing JARVIS's behaviour needs an admin, or one of the writable entities
+above (see *Who can write to the entities* below).
 
 ### Snapshots are served authenticated
 
@@ -179,8 +198,18 @@ root at
 and are served only through
 
 ```
-/api/jarvis/snapshot/{faces|intrusion}/{filename}      (requires authentication)
+/api/jarvis/snapshot/faces/{filename}         admin only
+/api/jarvis/snapshot/intrusion/{filename}     any authenticated user
 ```
+
+Authentication is required for both; `faces` additionally requires an admin,
+because pinned face frames are biometric images of other residents under a
+guessable name (`<name>.jpg`, `unknown_<camera>.jpg`) and the `jarvis/faces`
+commands are admin-only for the same reason. Intrusion stills stay open to
+every logged-in user on purpose: JARVIS pushes them to every household phone,
+and the companion app fetches the image with that member's own token. (The
+notification carries the **relative** `/api/jarvis/snapshot/...` path — the
+companion apps only attach the user's token to relative URLs.)
 
 Filenames are restricted to a single safe path component ending in `.jpg`/`.jpeg`,
 the file is read off the event loop, and the response is `Cache-Control: no-store`.

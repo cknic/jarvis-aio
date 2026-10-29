@@ -178,7 +178,11 @@ def _entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
     """All entity_ids whose (entity area) or (device area) matches.
 
     Skips user-excluded entities so the room card (light count, capabilities,
-    last motion) doesn't show or count entities the user has excluded.
+    last motion) doesn't show or count entities the user has excluded, and
+    JARVIS's own entities (``platform == DOMAIN``): the occupied mirrors
+    derive from this very scan, so counting them (once the JARVIS device is
+    assigned to an area) would make the room occupied forever and add a
+    permanent ``mmwave`` capability.
     """
     from homeassistant.helpers import entity_registry as er, device_registry as dr
     try:
@@ -189,6 +193,8 @@ def _entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
     dev_reg = dr.async_get(hass)
     out = []
     for ent in ent_reg.entities.values():
+        if getattr(ent, "platform", None) == DOMAIN:
+            continue  # our own mirrors (occupied/status entities) never count
         ent_area = ent.area_id
         if not ent_area and ent.device_id:
             dev = dev_reg.async_get(ent.device_id)

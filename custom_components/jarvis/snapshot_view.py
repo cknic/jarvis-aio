@@ -215,6 +215,8 @@ def make_view_class() -> type:
 
         async def get(self, request: Any, kind: str, filename: str):
             from aiohttp import web
+            if not valid_kind(kind) or not valid_filename(filename):
+                return web.Response(status=404, text="snapshot not found")
             if not may_fetch(kind, _request_user(request)):
                 # 401 (not 404): the caller is authenticated but not allowed
                 # to see this kind; nothing about the file's existence leaks

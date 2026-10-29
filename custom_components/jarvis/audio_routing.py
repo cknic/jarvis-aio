@@ -252,6 +252,10 @@ def presence_entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
         from .entity_filter import is_nonperson_object_sensor as _nonperson
     except Exception:
         _nonperson = lambda _e, _n=None: False
+    try:
+        from .entity_filter import is_own_entity as _own
+    except Exception:
+        _own = lambda _h, _e: False
     out = []
     for e in all_bs:
         if _excl(hass, e):
@@ -264,6 +268,8 @@ def presence_entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
             continue
         if _nonperson(e, state.attributes.get("friendly_name")):
             continue  # #254: a car/animal/package detector is not a human being present
+        if _own(hass, e):
+            continue  # binary_sensor.jarvis_<room>_occupied MIRRORS this scan; never feed it back
         if entity_area(hass, e) == area_id:
             out.append(e)
     return out

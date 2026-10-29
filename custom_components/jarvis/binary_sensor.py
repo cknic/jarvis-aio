@@ -20,13 +20,12 @@ Area placement
 The occupied entities deliberately carry **no HA area**. JARVIS discovers
 presence by scanning every ``binary_sensor`` with device_class occupancy/motion/
 presence whose entity (or device) area matches (``audio_routing.
-presence_entities_in_area``, ``panel_data._entities_in_area``), and neither
-scan skips JARVIS's own entities. Placing ``binary_sensor.jarvis_kitchen_occupied``
-in *Kitchen* would therefore feed its own state back into the occupancy it
-mirrors — once "on" it would keep the room occupied forever, and every room
-would gain a permanent ``mmwave`` capability. Until those scans exclude
-``platform == DOMAIN`` entities the room stays on the JARVIS device; the
-``area_id`` attribute still says which room each entity mirrors.
+presence_entities_in_area``, ``panel_data._entities_in_area``). Both scans skip
+JARVIS's own entities (``entity_filter.is_own_entity``, platform == DOMAIN), so
+assigning the JARVIS device to an area can no longer feed
+``binary_sensor.jarvis_kitchen_occupied`` back into the occupancy it mirrors
+(occupied forever, permanent ``mmwave`` capability). The entities still carry
+no area of their own; the ``area_id`` attribute says which room each mirrors.
 """
 from __future__ import annotations
 

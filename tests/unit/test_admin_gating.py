@@ -53,6 +53,7 @@ ADMIN_ONLY_READ_COMMANDS = [
 # Mixed read/write commands: (command type, actions that must be guarded).
 GUARDED_BRANCHES = {
     "jarvis/faces": {"list"},
+    "jarvis/voices": {"list", "identify", "enroll", "forget"},
     "jarvis/hazard": {"scan"},
     "jarvis/semantic_search": {"test"},
     "jarvis/documents": {"status", "search"},
@@ -366,11 +367,16 @@ async def test_intrusion_log_denied_but_status_open_for_non_admin(fake_hass, mon
 
     async def _load(hass):
         loaded.append("load")
+    snap = {"path": "/config/jarvis/snapshots/intrusion/intrusion_front_door_1.jpg",
+            "url": "/api/jarvis/snapshot/intrusion/intrusion_front_door_1.jpg",
+            "camera": "camera.front_door", "ts": 1730000000}
+    full_status = {"last_snapshot": snap, "called_off": False, "acknowledged": False,
+                   "suppressed_for": 0, "false_alarms_24h": 1}
     intrusion = types.SimpleNamespace(
         async_load=_load,
         get_log=lambda limit: [{"snapshot": "/api/x.jpg"}],
         learning_summary=lambda: {},
-        status=lambda: {"active": False},
+        status=lambda: dict(full_status),
     )
     _install_jc_module(monkeypatch, "intrusion", intrusion)
 
@@ -380,6 +386,80 @@ async def test_intrusion_log_denied_but_status_open_for_non_admin(fake_hass, mon
     assert nonadmin.error is not None and nonadmin.error[1] == "unauthorized"
     assert loaded == []
 
+    # Open status read, but REDACTED: no server path / camera / snapshot URL.
     reader = _Conn(is_admin=False)
     await websocket.ws_intrusion(fake_hass, reader, {"id": 2, "action": "status"})
-    assert reader.error is None and reader.result[1] == {"active": False}
+    assert reader.error is None
+    assert reader.result[1] == {"called_off": False, "acknowledged": False,
+                                "suppressed_for": 0, "false_alarms_24h": 1}
+    assert "last_snapshot" not in reader.result[1]
+
+    # The panel (admin) still gets the full record for its snapshot card.
+    admin = _Conn(is_admin=True)
+    await websocket.ws_intrusion(fake_hass, admin, {"id": 3, "action": "status"})
+    assert admin.error is None and admin.result[1] == full_status
+    assert admin.result[1]["last_snapshot"] == snap
+
+
+async def test_voices_list_and_identify_denied_for_non_admin(fake_hass, monkeypatch):
+    """The voiceprint roster (names), the server model path and on-demand
+    speaker identification are household/biometric data: admin-only, like faces."""
+    websocket = _load_websocket_module()
+    calls: list[str] = []
+    voice_roster = types.SimpleNamespace(
+        all_profiles=lambda: calls.append("profiles") or [
+            {"name": "Sam", "count": 3, "updated": 1}],
+        enroll=lambda n, e: True, remove=lambda n: None)
+    speaker_id = types.SimpleNamespace(
+        embed_wav=lambda raw: calls.append("embed") or [0.1],
+        identify=lambda emb: calls.append("identify") or {"name": "Sam"},
+        backend_available=lambda: True)
+    voice_recognition = types.SimpleNamespace(current_local_speaker=lambda: None)
+    for name, mod in (("voice_roster", voice_roster), ("speaker_id", speaker_id),
+                      ("voice_recognition", voice_recognition)):
+        _install_jc_module(monkeypatch, name, mod)
+    monkeypatch.setattr(websocket, "_get_entry", lambda hass: None)
+    monkeypatch.setattr(websocket, "_runtime_opt",
+                        lambda hass, entry, key, default=None: "/models/x.onnx"
+                        if key == "voice_embedding_model_path" else default)
+
+    for msg in ({"id": 1, "action": "list"}, {"id": 2},
+                {"id": 3, "action": "identify", "audio": "AAAA"}):
+        conn = _Conn(is_admin=False)
+        await websocket.ws_voices(fake_hass, conn, msg)
+        assert conn.result is None, msg
+        assert conn.error is not None and conn.error[1] == "unauthorized", msg
+    assert calls == []          # no roster read, no inference for a non-admin
+
+    admin = _Conn(is_admin=True)
+    await websocket.ws_voices(fake_hass, admin, {"id": 4, "action": "list"})
+    assert admin.error is None
+    assert admin.result[1]["profiles"] == [{"name": "Sam", "count": 3, "updated": 1}]
+    assert admin.result[1]["model_path"] == "/models/x.onnx"
+    admin2 = _Conn(is_admin=True)
+    await websocket.ws_voices(fake_hass, admin2, {"id": 5, "action": "identify", "audio": "AAAA"})
+    assert admin2.error is None and admin2.result[1] == {"match": {"name": "Sam"}}
+
+
+async def test_semantic_search_status_hides_endpoint_from_non_admin(fake_hass, monkeypatch):
+    """'status' stays open, but the internal Ollama/embedding endpoint and model
+    are infrastructure details only the admin-only Settings tab needs."""
+    websocket = _load_websocket_module()
+    embeddings = types.SimpleNamespace(
+        _ollama_base=lambda: "http://ollama.lan:11434",
+        _model=lambda: "nomic-embed-text",
+        vector_count=lambda: 42)
+    jarvis_config = types.SimpleNamespace(get=lambda key, default=None: True)
+    _install_jc_module(monkeypatch, "embeddings", embeddings)
+    _install_jc_module(monkeypatch, "jarvis_config", jarvis_config)
+
+    reader = _Conn(is_admin=False)
+    await websocket.ws_semantic_search(fake_hass, reader, {"id": 1, "action": "status"})
+    assert reader.error is None
+    assert reader.result[1] == {"enabled": True, "ollama_configured": True, "vector_count": 42}
+
+    admin = _Conn(is_admin=True)
+    await websocket.ws_semantic_search(fake_hass, admin, {"id": 2, "action": "status"})
+    assert admin.error is None
+    assert admin.result[1] == {"enabled": True, "ollama_configured": True, "vector_count": 42,
+                               "base": "http://ollama.lan:11434", "model": "nomic-embed-text"}

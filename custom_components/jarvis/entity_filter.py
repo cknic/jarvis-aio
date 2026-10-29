@@ -124,6 +124,27 @@ def is_excluded(hass: HomeAssistant, entity_id: Optional[str]) -> bool:
     return False
 
 
+def is_own_entity(hass: HomeAssistant, entity_id: Optional[str]) -> bool:
+    """True when ``entity_id`` is one of JARVIS's own native entities (its
+    registry entry's ``platform`` is this integration's domain).
+
+    JARVIS's occupied / status entities MIRROR what the presence and area scans
+    compute; if a scan counted them (a user assigns the JARVIS device to an
+    area, which HA actively prompts for) the mirror would feed itself — a room
+    once "on" stays occupied forever and gains a permanent ``mmwave``
+    capability. Likewise the snapshot coordinator must not re-arm its
+    state_changed debounce on the entities it just wrote. Cheap: a single
+    in-memory registry lookup, safe on the hot state-change path.
+    """
+    if not entity_id:
+        return False
+    try:
+        ent = er.async_get(hass).async_get(entity_id)
+    except Exception:
+        return False
+    return bool(ent is not None and getattr(ent, "platform", None) == DOMAIN)
+
+
 def _presence_only_config(hass: HomeAssistant) -> set[str]:
     """The set of ``presence_only_entities`` from runtime_config."""
     out: set[str] = set()

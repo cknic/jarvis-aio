@@ -6,7 +6,11 @@ native Home Assistant entity (fork Phase 0).
   start the timer; ``request_refresh`` still works without listeners).
 * Listens to ``state_changed`` for the domains in
   ``COORDINATOR_REFRESH_DOMAINS`` and debounces them (``COORDINATOR_DEBOUNCE_S``)
-  into ``async_request_refresh``.
+  into ``async_request_refresh``. Events for the integration's OWN entities
+  are ignored: they are written by every refresh (``sensor.jarvis_uptime`` and
+  the area rows' ``last_motion`` change at one-second granularity), so without
+  the filter each refresh re-armed the debounce and the coordinator chased
+  itself at the Debouncer's 10 s cooldown instead of the 20 s poll.
 * :func:`request_refresh` is the best-effort hook other modules call after
   lockdown / mode / observer changes.
 
@@ -32,6 +36,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 
 from . import panel_data
+from .entity_filter import is_own_entity
 from .const import (
     COORDINATOR_DEBOUNCE_S,
     COORDINATOR_REFRESH_DOMAINS,
@@ -137,6 +142,8 @@ class JarvisCoordinator(DataUpdateCoordinator[dict]):
         entity_id = str((event.data or {}).get("entity_id") or "")
         if entity_id.split(".", 1)[0] not in COORDINATOR_REFRESH_DOMAINS:
             return
+        if is_own_entity(self.hass, entity_id):
+            return  # our own sensors echo every refresh; never refresh on the echo
         if self._debounce_unsub is not None:
             return  # a refresh is already pending — absorb the burst
         from homeassistant.helpers.event import async_call_later

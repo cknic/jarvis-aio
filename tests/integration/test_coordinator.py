@@ -12,6 +12,7 @@ forward/unload only.
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -169,3 +170,52 @@ async def test_pending_debounce_is_cancelled_on_unload(hass):
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
     assert coord._debounce_unsub is None  # verify_cleanup would flag a live timer
+
+
+async def test_own_entities_do_not_rearm_the_debounce(hass, freezer):
+    """Review finding: with the sensor platform live, every refresh rewrote
+    ``sensor.jarvis_uptime`` (one-second granularity), that state_changed
+    re-armed the debounce, and the coordinator chased itself at the Debouncer's
+    10 s cooldown. Own entities must be ignored; foreign ones still count."""
+    counting = _CountingSnapshot()
+    with patch("custom_components.jarvis.create_provider", return_value=_FakeProvider()), \
+         patch("custom_components.jarvis.PLATFORMS", ["sensor"]), \
+         patch.object(panel_data, "build_snapshot", counting):
+        entry = await _setup(hass)
+        coord = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+        uptime_eid = er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_uptime")
+        assert uptime_eid and hass.states.get(uptime_eid) is not None
+
+        async def _tick(seconds: int) -> None:
+            freezer.tick(timedelta(seconds=seconds))
+            async_fire_time_changed(hass, dt_util.utcnow())
+            await hass.async_block_till_done()
+
+        # drain the setup-time refresh requests and HA's 10 s request cooldown
+        for _ in range(3):
+            await _tick(11)
+        assert coord._debounce_unsub is None
+
+        # 60 simulated seconds, one-second steps, nothing external touched:
+        # plain polling (20 s interval → at most 3 refreshes), and after EVERY
+        # step the debounce is still unarmed — with the bug, the first refresh's
+        # own sensor echo armed it and the coordinator chased itself every 10 s.
+        base = counting.calls
+        for _ in range(60):
+            await _tick(1)
+            assert coord._debounce_unsub is None
+        assert 1 <= counting.calls - base <= 3
+
+        # an explicit state write to one of our entities is ignored too …
+        hass.states.async_set(uptime_eid, "forced", {})
+        await hass.async_block_till_done()
+        assert coord._debounce_unsub is None
+        # … while a foreign sensor in a refresh domain still schedules a refresh
+        hass.states.async_set("sensor.kitchen_power", "12")
+        await hass.async_block_till_done()
+        assert coord._debounce_unsub is not None
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert coord._debounce_unsub is None

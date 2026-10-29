@@ -14,20 +14,27 @@ administrators. Full entity list and dashboard walkthrough:
   shows household data (faces, intrusion stills, documents, memory) and controls
   paid LLM work, so it is admin territory. Household members get entities instead.
 - **Every write over the WebSocket is gated.** Commands that only write carry
-  `@require_admin`; mixed read/write commands (`jarvis/mode`, `jarvis/faces`,
-  `jarvis/voices`, `jarvis/mutes`, `jarvis/documents`, `jarvis/intrusion`,
-  `jarvis/energy`, `jarvis/hazard`, `jarvis/biometrics`, `jarvis/semantic_search`)
-  still answer reads for anyone but reply `unauthorized` to a non-admin who tries
-  an enable/disable/set/enroll/forget/mute/scan/upload action. Stock cards keep
-  working for everyone.
+  `@require_admin`; mixed read/write commands (`jarvis/mode`, `jarvis/mutes`,
+  `jarvis/intrusion`, `jarvis/energy`, `jarvis/hazard`, `jarvis/biometrics`,
+  `jarvis/semantic_search`) still answer plain status reads for anyone but reply
+  `unauthorized` to a non-admin who tries an enable/disable/set/mute/scan
+  action. `jarvis/faces`, `jarvis/voices` and `jarvis/documents` are admin-only
+  in every action (face frames, the voiceprint roster and speaker
+  identification, document contents). Non-admin `jarvis/intrusion status`
+  omits `last_snapshot` and non-admin `jarvis/semantic_search status` omits the
+  internal embedding endpoint. Stock cards keep working for everyone.
 - **Snapshots are authenticated.** Face-sighting frames and intrusion stills
   moved out of `<config>/www/jarvis/…` (served by HA *without* auth as
   `/local/…`) to `<config>/jarvis/snapshots/{faces,intrusion}/`, and are served
   only through `/api/jarvis/snapshot/{kind}/{filename}` with `requires_auth`,
   strict filename validation, executor-side reads and `Cache-Control: no-store`.
-  The panel fetches a signed URL for `<img src>`; companion-app notification
-  images keep working with the user's own auth. Nothing is migrated: old frames
-  under `www/jarvis` stay where they are until you delete the directory.
+  `faces` is admin-only (biometric frames under guessable names; same rule as
+  `jarvis/faces`); `intrusion` is open to any authenticated user because the
+  still is pushed to every household phone. The panel fetches a signed URL for
+  `<img src>`; notifications carry the relative `/api/...` path, which is the
+  only form the companion apps attach the user's token to, so images keep
+  working. Nothing is migrated: old frames under `www/jarvis` stay where they
+  are until you delete the directory.
 - **`secrets.yaml` is cached.** Reads are cached per path on the file's
   mtime/size, so the hot paths cost one `os.stat()` instead of a YAML parse (the
   panel poll was re-parsing it up to five times a cycle). Editing the file
@@ -38,8 +45,13 @@ administrators. Full entity list and dashboard walkthrough:
 - **One snapshot, one coordinator.** `panel_data.build_snapshot` produces the
   payload the panel always received, and a `DataUpdateCoordinator`
   (`coordinator.JarvisCoordinator`) refreshes it every 20 s while anything
-  listens, plus a debounced refresh on relevant state changes and immediately
-  after any setting, mode or lockdown change from anywhere. The panel's
+  listens, plus a debounced refresh on relevant state changes (JARVIS's own
+  entities excluded, so a refresh never re-triggers itself) and immediately
+  after any setting, mode or lockdown change from anywhere. The presence and
+  room scans skip JARVIS's own entities too, so assigning the JARVIS device to
+  an area cannot feed `binary_sensor.jarvis_<area>_occupied` back into the
+  occupancy it mirrors. Minimum Home Assistant is now 2024.11 (the alarm
+  panel's `AlarmControlPanelState`). The panel's
   `get_panel_data` payload is byte-for-byte unchanged.
 - **Native entities on a single `JARVIS` device** (manufacturer
   `jarvis-aio fork`, model `AI butler`):
