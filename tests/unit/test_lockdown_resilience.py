@@ -288,3 +288,90 @@ async def test_reopen_after_secure_is_adopted_and_alerts(cognitive_core, fake_ha
     assert action is not None and action["type"] == "lockdown_breach"
     assert "cover.garage_door" in mgr.exempt_windows
     assert "cover.garage_door" not in mgr._secured_by_us
+
+
+# ── fork Phase 1: alarm_control_panel.jarvis_lockdown is a MIRROR, not an alarm ─
+# The native lockdown entity reads armed_away while lockdown is active and marks
+# itself with ``jarvis_internal: True``. The household-alarm sweeps must skip it,
+# otherwise an auto-engaged lockdown can never see the real panel's disarm.
+
+def test_alarm_state_view_ignores_jarvis_internal_mirror(cognitive_core, fake_hass):
+    _reset(cognitive_core)
+    fake_hass.states.set("alarm_control_panel.jarvis_lockdown", "armed_away", jarvis_internal=True)
+    fake_hass.states.set("alarm_control_panel.cove", "disarmed")
+    # The mirror alone must not make the house read as armed.
+    assert cognitive_core._alarm_state_view(fake_hass) == (False, True, False)
+    assert cognitive_core._armed_mode(fake_hass) == ""
+    # Only the mirror present -> indeterminate (no household panel), not armed.
+    fake_hass.states.remove("alarm_control_panel.cove")
+    assert cognitive_core._alarm_state_view(fake_hass) == (False, False, True)
+    # A real armed panel still reads through.
+    fake_hass.states.set("alarm_control_panel.cove", "armed_home")
+    assert cognitive_core._alarm_state_view(fake_hass) == (True, False, False)
+    assert cognitive_core._armed_mode(fake_hass) == "armed_home"
+
+
+def test_is_jarvis_internal_accepts_states_and_facade_dicts(cognitive_core):
+    from fakes import FakeState
+    assert cognitive_core._is_jarvis_internal(FakeState("alarm_control_panel.x", "armed_away", {"jarvis_internal": True}))
+    assert not cognitive_core._is_jarvis_internal(FakeState("alarm_control_panel.x", "armed_away"))
+    assert cognitive_core._is_jarvis_internal({"state": "armed_away", "attributes": {"jarvis_internal": True}})
+    assert not cognitive_core._is_jarvis_internal({"state": "armed_away", "attributes": {}})
+    assert not cognitive_core._is_jarvis_internal(None)
+
+
+async def test_real_alarm_disarm_lifts_lockdown_despite_mirror(cognitive_core, fake_hass):
+    """Regression: arm real panel -> lockdown engages -> mirror reads armed_away;
+    disarming the real panel must still lift the auto lockdown."""
+    _reset(cognitive_core)
+    fake_hass.states.set("alarm_control_panel.cove", "armed_away")
+    await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
+    fake_hass.close_pending()
+    assert cognitive_core.is_lockdown() is True
+    assert cognitive_core._CORE.lockdown_mgr.auto is True
+
+    # What alarm_control_panel.jarvis_lockdown now publishes.
+    fake_hass.states.set("alarm_control_panel.jarvis_lockdown", "armed_away", jarvis_internal=True)
+
+    fake_hass.states.set("alarm_control_panel.cove", "disarmed")
+    await cognitive_core._sync_lockdown_to_alarm("alarm alarm_control_panel.cove")
+    fake_hass.close_pending()
+    assert cognitive_core.is_lockdown() is False
+
+
+async def test_lockdown_listener_ignores_mirror_entity_events(cognitive_core, fake_hass, monkeypatch):
+    from fakes import FakeState
+    _reset(cognitive_core)
+    cognitive_core._CORE.hass = fake_hass
+    calls = []
+
+    async def _fake_sync(reason, announce=True):
+        calls.append((reason, announce))
+
+    monkeypatch.setattr(cognitive_core, "_sync_lockdown_to_alarm", _fake_sync)
+
+    class _Event:
+        def __init__(self, data):
+            self.data = data
+
+    # Mirror entity transitions are echoes of lockdown itself -> ignored.
+    await cognitive_core._on_lockdown_state(_Event({
+        "entity_id": "alarm_control_panel.jarvis_lockdown",
+        "old_state": FakeState("alarm_control_panel.jarvis_lockdown", "disarmed", {"jarvis_internal": True}),
+        "new_state": FakeState("alarm_control_panel.jarvis_lockdown", "armed_away", {"jarvis_internal": True}),
+    }))
+    # Entity removal (new_state None) with a marked old_state is ignored too.
+    await cognitive_core._on_lockdown_state(_Event({
+        "entity_id": "alarm_control_panel.jarvis_lockdown",
+        "old_state": FakeState("alarm_control_panel.jarvis_lockdown", "armed_away", {"jarvis_internal": True}),
+        "new_state": None,
+    }))
+    assert calls == []
+
+    # A household panel's genuine arm still syncs.
+    await cognitive_core._on_lockdown_state(_Event({
+        "entity_id": "alarm_control_panel.cove",
+        "old_state": FakeState("alarm_control_panel.cove", "disarmed"),
+        "new_state": FakeState("alarm_control_panel.cove", "armed_away"),
+    }))
+    assert calls == [("alarm alarm_control_panel.cove", True)]

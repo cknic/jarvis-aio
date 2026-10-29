@@ -2461,7 +2461,8 @@ async def test_list_models_error_is_generic_not_reflected(fake_hass, monkeypatch
 
 def test_pure_write_commands_are_admin_gated_in_source():
     """Every state-changing panel command must carry @websocket_api.require_admin
-    so a non-admin HA user can't invoke it (the panel is require_admin=False)."""
+    so a non-admin HA user can't invoke it even if they reach the WS API
+    directly (the panel itself is registered require_admin=True since the fork)."""
     comp = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "jarvis"
     src = (comp / "websocket.py").read_text(encoding="utf-8")
     for cmd in ["reload_appliances", "set_lockdown", "add_knowledge",

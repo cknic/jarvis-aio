@@ -20,6 +20,18 @@ _ALLOWED_UNDECLARED = {
     "persistent_notification",  # always available, auto-set-up
     "websocket_api",            # core API surface, always present (hassfest
                                 # does not require it in dependencies)
+    # Entity platforms this integration implements (fork Phase 1). A
+    # <platform>.py file importing homeassistant.components.<platform> is how
+    # every integration provides entities; hassfest allow-lists every
+    # Platform enum member for exactly this reason (ALLOWED_USED_COMPONENTS),
+    # so they are never declared in a manifest.
+    "alarm_control_panel",
+    "binary_sensor",
+    "event",
+    "number",
+    "select",
+    "sensor",
+    "switch",
 }
 
 

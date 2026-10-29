@@ -11,9 +11,19 @@ Two additions to the existing SafetyManager intrusion flow:
      active investigation, suppresses further escalation for a cooldown, and
      records the false alarm so repeated benign triggers can be learned from.
 
-Snapshots are written under /config/www/jarvis/intrusion (served at
-/local/jarvis/intrusion/...) so HA can render them in notifications and the
-panel. Everything here is defensive and never raises to the caller.
+Snapshots are written under <config>/jarvis/snapshots/intrusion/ — OUTSIDE the
+web root — and served only through the authenticated view in snapshot_view.py,
+so every ``url`` handed out here looks like
+``/api/jarvis/snapshot/intrusion/<tag>_<camera>_<ts>.jpg``. The panel signs
+that path (``auth/sign_path``) before using it as an <img src>; the HA
+companion app fetches ``/api/...`` notification attachments with the user's own
+auth, so ``notify.mobile_app_*`` images keep working unchanged.
+
+CHANGELOG (A2): previously ``/config/www/jarvis/intrusion`` → ``/local/...``,
+which HA serves WITHOUT authentication. Nothing is migrated: stills already
+under ``www/jarvis/intrusion`` are left where they are (delete the directory to
+stop /local serving them); filenames are unchanged. Everything here is
+defensive and never raises to the caller.
 """
 from __future__ import annotations
 
@@ -27,12 +37,14 @@ from pathlib import Path
 from typing import Optional
 
 from .paths import config_path, config_path_str, has_hass_config_path
+from .snapshot_view import SNAPSHOT_URL_BASE as _SNAPSHOT_URL_BASE
 
 _LOGGER = logging.getLogger(__name__)
 
-# Servable snapshot dir: /config/www/... is exposed at /local/...
-SNAPSHOT_DIR = config_path_str("www", "jarvis", "intrusion")
-SNAPSHOT_URL_BASE = "/local/jarvis/intrusion"
+# Private snapshot dir (not under www): served by snapshot_view with auth.
+SNAPSHOT_KIND = "intrusion"
+SNAPSHOT_DIR = config_path_str("jarvis", "snapshots", SNAPSHOT_KIND)
+SNAPSHOT_URL_BASE = f"{_SNAPSHOT_URL_BASE}/{SNAPSHOT_KIND}"
 _MAX_SNAPSHOTS = 40           # keep the last N, prune older
 
 # Call-off state (module-level; the investigation itself lives in SafetyManager)
@@ -269,7 +281,7 @@ async def capture_snapshot(hass, camera_entity: str,
     try:
         global SNAPSHOT_DIR
         if has_hass_config_path(hass):
-            SNAPSHOT_DIR = config_path_str("www", "jarvis", "intrusion", hass=hass)
+            SNAPSHOT_DIR = config_path_str("jarvis", "snapshots", SNAPSHOT_KIND, hass=hass)
         from homeassistant.components.camera import async_get_image as _get_image
         image = await _get_image(hass, camera_entity, timeout=10)
         content = getattr(image, "content", None)

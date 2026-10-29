@@ -197,6 +197,29 @@ def test_notification_image_data_makes_local_absolute(cognitive_core, fake_hass)
     assert "image" in data and "attachment" in data
 
 
+@pytest.mark.parametrize("path", [
+    "/api/jarvis/snapshot/intrusion/intrusion_front_door_1730000000.jpg",
+    "/api/jarvis/snapshot/faces/sam.jpg",
+])
+def test_notification_image_data_keeps_api_snapshot_relative(cognitive_core, fake_hass, path):
+    """A2: snapshots are served authenticated at /api/jarvis/snapshot/...; the
+    companion apps only attach the user's token to RELATIVE urls, so the path
+    must pass through unchanged on both platform keys even when HA has an
+    external/internal URL configured."""
+    fake_hass.config.external_url = "https://home.example.com"
+    fake_hass.config.internal_url = "http://homeassistant.local:8123"
+    data = cognitive_core._notification_image_data(fake_hass, path)
+    assert data["image"] == path
+    assert data["attachment"]["url"] == path
+
+
+def test_notification_image_data_legacy_local_still_absolutized(cognitive_core, fake_hass):
+    fake_hass.config.external_url = "https://home.example.com"
+    data = cognitive_core._notification_image_data(fake_hass, "/local/jarvis/intrusion/x.jpg")
+    assert data["image"] == "https://home.example.com/local/jarvis/intrusion/x.jpg"
+    assert data["attachment"]["url"] == data["image"]
+
+
 def test_notification_image_data_none_is_empty(cognitive_core, fake_hass):
     assert cognitive_core._notification_image_data(fake_hass, None) == {}
     assert cognitive_core._notification_image_data(fake_hass, "") == {}

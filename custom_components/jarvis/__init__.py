@@ -22,6 +22,7 @@ from .const import (
     CONF_TTS_ENGINE,
     CONF_TTS_PREMIUM_ENGINE,
     CONF_TTS_PREMIUM_CONTEXTS,
+    DATA_COORDINATOR,
     DEFAULT_HONORIFIC,
     DEFAULT_TTS_ENGINE,
     DEFAULT_TTS_PREMIUM_ENGINE,
@@ -46,6 +47,7 @@ from .llm_provider import create_provider
 from .migrations import migrate_config, CURRENT_SCHEMA_VERSION
 from .panel_register import async_register_panel, async_unregister_panel
 from .websocket import async_register as async_register_ws
+from .coordinator import JarvisCoordinator, request_refresh as request_coordinator_refresh
 from .proactive_audio import (
     async_setup_proactive_audio,
     async_unload_proactive_audio,
@@ -111,7 +113,18 @@ def _prewarm_persisted_state() -> None:
     except Exception:
         pass
 
-PLATFORMS = ["conversation", "stt"]
+PLATFORMS = [
+    "conversation",
+    "stt",
+    # fork Phase 0/1 — native entities, all backed by coordinator.JarvisCoordinator
+    "binary_sensor",
+    "sensor",
+    "switch",
+    "select",
+    "number",
+    "alarm_control_panel",
+    "event",
+]
 # Config-entry only (v6.45.0): warns users who still have `jarvis:` in YAML.
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -804,6 +817,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # completes just falls back to defaults.
     _register_services(hass, entry, _current_client, sentinel)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    # ── Snapshot coordinator (fork Phase 0) — one panel_data.build_snapshot
+    # feeding every native entity. First refresh BEFORE the platform forward so
+    # entities are created with data; a snapshot failure must never block setup.
+    coordinator = JarvisCoordinator(hass, entry)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception as exc:  # noqa: BLE001 - degrade to a plain refresh
+        _LOGGER.warning("JARVIS snapshot first refresh failed (%s); continuing", exc)
+        try:
+            await coordinator.async_refresh()
+        except Exception:
+            pass
+    coordinator.async_start_listening()
+    hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR] = coordinator
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Restore persisted panel settings via centralized jarvis_config module.
@@ -876,9 +905,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from . import observer as observer_mod
         await observer_mod.start(hass, observer_config)
         hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+        request_coordinator_refresh(hass)
         _LOGGER.info("JARVIS Observer mode ENABLED — watching for interesting events")
     else:
         hass.data[DOMAIN][entry.entry_id]["observer_running"] = False
+        request_coordinator_refresh(hass)
         _LOGGER.info(
             "JARVIS Observer mode disabled. Enable via addon config → observer_enabled=true"
         )
@@ -903,6 +934,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await async_register_panel(hass)
     except Exception as exc:
         _LOGGER.warning("JARVIS panel registration failed (non-fatal): %s", exc)
+
+    # A2: authenticated snapshot view (/api/jarvis/snapshot/...) replacing /local.
+    try:
+        from .snapshot_view import async_register_snapshot_view
+        async_register_snapshot_view(hass)
+    except Exception as exc:
+        _LOGGER.warning("JARVIS snapshot view registration failed (non-fatal): %s", exc)
 
     # Register WebSocket API command for live panel data
     try:
@@ -978,6 +1016,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as exc:
         _LOGGER.debug("Panel unregister note: %s", exc)
 
+    # Stop the snapshot coordinator (cancels its poll + state_changed debounce)
+    # before the platforms unload so no timer outlives the entry.
+    coordinator = data.get(DATA_COORDINATOR)
+    if coordinator is not None:
+        try:
+            await coordinator.async_shutdown()
+        except Exception as exc:
+            _LOGGER.debug("Coordinator shutdown note: %s", exc)
+
     sentinel: JarvisSentinel | None = data.get("sentinel")
     if sentinel:
         await sentinel.async_stop()
@@ -1028,14 +1075,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as exc:
         _LOGGER.debug("Proactive-audio unload note: %s", exc)
 
-    # Stop the persistent-log writer thread so it doesn't outlive the entry and
-    # leak across reloads. The join is brief but blocks, so run it off-loop.
-    try:
-        from .websocket import stop_log_writer
-        await hass.async_add_executor_job(stop_log_writer)
-    except Exception as exc:
-        _LOGGER.debug("Log-writer stop note: %s", exc)
-
     # Flush any buffered events so the shadow trail isn't lost on unload/reload.
     event_ledger = data.get("event_ledger")
     if event_ledger is not None:
@@ -1050,6 +1089,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, service)
 
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    # Stop the persistent-log writer thread so it doesn't outlive the entry and
+    # leak across reloads. The join is brief but blocks, so run it off-loop.
+    # Runs AFTER the platforms unload: removing the native entities can still
+    # trip a jarvis_log() (fork Phase 1), which would re-spawn the thread.
+    try:
+        from .websocket import stop_log_writer
+        await hass.async_add_executor_job(stop_log_writer)
+    except Exception as exc:
+        _LOGGER.debug("Log-writer stop note: %s", exc)
+
     if ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return ok
@@ -1496,6 +1546,7 @@ def _register_services(
         observer_config = await hass.async_add_executor_job(_jc.effective_config, entry)
         await observer_mod.start(hass, observer_config)
         hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+        request_coordinator_refresh(hass)
         _LOGGER.info("Observer started via service call")
 
     _register_service("observer_start", _observer_start)
@@ -1561,6 +1612,7 @@ def _register_services(
         from . import observer as observer_mod
         await observer_mod.stop()
         hass.data[DOMAIN][entry.entry_id]["observer_running"] = False
+        request_coordinator_refresh(hass)
         _LOGGER.info("Observer stopped via service call")
 
     _register_service("observer_stop", _observer_stop)

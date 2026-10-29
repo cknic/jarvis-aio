@@ -74,10 +74,10 @@ def test_snapshot_index_restored_only_if_frame_exists(recog):
     live.parent.mkdir(parents=True, exist_ok=True)
     live.write_bytes(b"\xff\xd8\xff")      # a frame that still exists on disk
     mod._FACE_SNAPSHOTS["sam"] = {
-        "url": "/local/jarvis/faces/sam.jpg", "path": str(live),
+        "url": "/api/jarvis/snapshot/faces/sam.jpg", "path": str(live),
         "ts": 1.0, "camera_entity": "camera.front_door"}
     mod._FACE_SNAPSHOTS["ghost"] = {
-        "url": "/local/jarvis/faces/ghost.jpg",
+        "url": "/api/jarvis/snapshot/faces/ghost.jpg",
         "path": str(tmp_path / "faces" / "ghost.jpg"),   # no such file
         "ts": 1.0, "camera_entity": "camera.driveway"}
     mod._persist_save(force=True)
@@ -87,6 +87,33 @@ def test_snapshot_index_restored_only_if_frame_exists(recog):
 
     assert "sam" in mod._FACE_SNAPSHOTS          # frame present → restored
     assert "ghost" not in mod._FACE_SNAPSHOTS    # frame gone → dropped
+
+
+def test_pre_a2_local_pins_dropped_on_restore(recog):
+    """A2: an index entry persisted with the old unauthenticated /local URL
+    points at a www/ frame the authenticated view will not serve — it must not
+    be restored even though the file still exists (it re-pins on next sighting)."""
+    mod, _fr, tmp_path, _reset = recog
+    old = tmp_path / "www" / "jarvis" / "faces" / "sam.jpg"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_bytes(b"\xff\xd8\xff")
+    new = tmp_path / "jarvis" / "snapshots" / "faces" / "max.jpg"
+    new.parent.mkdir(parents=True, exist_ok=True)
+    new.write_bytes(b"\xff\xd8\xff")
+    mod._FACE_SNAPSHOTS["sam"] = {
+        "url": "/local/jarvis/faces/sam.jpg", "path": str(old),
+        "ts": 1.0, "camera_entity": "camera.front_door"}
+    mod._FACE_SNAPSHOTS["max"] = {
+        "url": "/api/jarvis/snapshot/faces/max.jpg", "path": str(new),
+        "ts": 1.0, "camera_entity": "camera.front_door"}
+    mod._persist_save(force=True)
+
+    _reset()
+    mod._persist_load()
+
+    assert "sam" not in mod._FACE_SNAPSHOTS      # stale /local pin → dropped
+    assert "max" in mod._FACE_SNAPSHOTS          # /api pin with frame → restored
+    assert mod._FACE_SNAPSHOTS["max"]["url"] == "/api/jarvis/snapshot/faces/max.jpg"
 
 
 def test_stale_entries_age_out_on_restore(recog):

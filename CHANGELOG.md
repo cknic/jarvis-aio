@@ -1,3 +1,84 @@
+## [10.0.0-fork.1] — JARVIS becomes a Home Assistant device: native entities, admin-only panel
+
+First release of the fork. The headline: you no longer need the custom panel to
+see or steer JARVIS. Every status the panel's Overview showed is now a stock
+Home Assistant entity on one **JARVIS** device, so it goes on any dashboard,
+into any automation, and through Assist — and the panel itself is reserved for
+administrators. Full entity list and dashboard walkthrough:
+[docs/native-entities.md](docs/native-entities.md).
+
+### Phase 0 — close the doors first
+
+- **The panel is admin-only.** The sidebar entry is registered with
+  `require_admin=True`; non-admin users don't see `/jarvis` at all. The panel
+  shows household data (faces, intrusion stills, documents, memory) and controls
+  paid LLM work, so it is admin territory. Household members get entities instead.
+- **Every write over the WebSocket is gated.** Commands that only write carry
+  `@require_admin`; mixed read/write commands (`jarvis/mode`, `jarvis/faces`,
+  `jarvis/voices`, `jarvis/mutes`, `jarvis/documents`, `jarvis/intrusion`,
+  `jarvis/energy`, `jarvis/hazard`, `jarvis/biometrics`, `jarvis/semantic_search`)
+  still answer reads for anyone but reply `unauthorized` to a non-admin who tries
+  an enable/disable/set/enroll/forget/mute/scan/upload action. Stock cards keep
+  working for everyone.
+- **Snapshots are authenticated.** Face-sighting frames and intrusion stills
+  moved out of `<config>/www/jarvis/…` (served by HA *without* auth as
+  `/local/…`) to `<config>/jarvis/snapshots/{faces,intrusion}/`, and are served
+  only through `/api/jarvis/snapshot/{kind}/{filename}` with `requires_auth`,
+  strict filename validation, executor-side reads and `Cache-Control: no-store`.
+  The panel fetches a signed URL for `<img src>`; companion-app notification
+  images keep working with the user's own auth. Nothing is migrated: old frames
+  under `www/jarvis` stay where they are until you delete the directory.
+- **`secrets.yaml` is cached.** Reads are cached per path on the file's
+  mtime/size, so the hot paths cost one `os.stat()` instead of a YAML parse (the
+  panel poll was re-parsing it up to five times a cycle). Editing the file
+  invalidates the cache; JARVIS's own narrow writes reset it.
+
+### Phase 1 — the device and its entities
+
+- **One snapshot, one coordinator.** `panel_data.build_snapshot` produces the
+  payload the panel always received, and a `DataUpdateCoordinator`
+  (`coordinator.JarvisCoordinator`) refreshes it every 20 s while anything
+  listens, plus a debounced refresh on relevant state changes and immediately
+  after any setting, mode or lockdown change from anywhere. The panel's
+  `get_panel_data` payload is byte-for-byte unchanged.
+- **Native entities on a single `JARVIS` device** (manufacturer
+  `jarvis-aio fork`, model `AI butler`):
+  - `binary_sensor.jarvis_asleep` and `binary_sensor.jarvis_<area>_occupied`
+    (device class occupancy — the stock Area card lights up from it);
+  - status sensors: `sensor.jarvis_observer`, `sensor.jarvis_llm_providers`,
+    `sensor.jarvis_broadcast`, `sensor.jarvis_notify`, `sensor.jarvis_satellites`,
+    and `sensor.jarvis_suggestions` with the pending suggestions in its `items`
+    attribute;
+  - `switch.*` for every boolean setting the panel exposes (Observer,
+    Cognition, Proactive announcements, Sentinel, Door/window alerts, Camera
+    auto-analyze, …), `select.*` for the enum settings (directive preset, banter
+    level, camera alert level, energy agency, languages, voice-confirm mode)
+    and `number.jarvis_intrusion_response_timeout` — all writing through the
+    same `config_apply.async_apply` path as the panel, so panel and entities
+    never disagree;
+  - `select.jarvis_mode` to read and set the operational mode
+    (normal / party / lab / movie / guest / away / focus);
+  - `alarm_control_panel.jarvis_lockdown`: arm-away engages lockdown, disarm
+    lifts it, `triggered` while an intrusion is active — the same lockdown the
+    panel and `jarvis.lockdown` drive;
+  - `event.jarvis_activity`, an event entity for JARVIS's own activity so it
+    appears in the **Logbook** with no extra configuration.
+- **Example dashboard.** `examples/jarvis-dashboard.yaml` is a sections-view
+  dashboard built from stock cards only (badges, Lockdown tile with arm/disarm,
+  status entities, logbook, Area cards with occupancy alerts and light toggles,
+  temperature history, a Markdown list of suggestions, and buttons for
+  `jarvis.briefing`, `jarvis.nap` and `jarvis.unshush`). It follows your light
+  or dark theme and installs by pasting into the raw configuration editor.
+- **Chat moved to Assist.** Conversation is Home Assistant's own Assist dialog
+  with the JARVIS agent; the dashboard links to it rather than embedding a chat.
+
+What stays panel-only (admins): the floor-plan editor and 3D Residence view,
+faces and voices, documents, LLM provider keys and per-tier model pickers,
+camera diagnostics and doorbell training, and applying suggestions.
+
+`manifest.json` still reads `9.35.0`; the fork version is a changelog marker
+until the first tagged fork release.
+
 ## [9.39.0] — Multi-step plans read the world before each step
 
 The same small completion the autonomous path got in 9.37.0, applied to

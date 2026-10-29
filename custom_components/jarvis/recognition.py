@@ -32,6 +32,11 @@ from typing import Optional
 from homeassistant.core import HomeAssistant, callback
 
 from .paths import config_path_str
+from .snapshot_view import SNAPSHOT_URL_BASE as _SNAPSHOT_URL_BASE
+
+
+def _snapshot_url_base(kind: str) -> str:
+    return f"{_SNAPSHOT_URL_BASE}/{kind}"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,11 +61,18 @@ CONFIDENCE_THRESHOLD = 60  # anything below this is considered uncertain
 # When a face is recognized confidently, JARVIS grabs the camera frame AT THAT
 # MOMENT and pins it, so the Faces panel shows the person as they were when seen
 # — not a live view that may now be empty. One stable file per normalized name
-# (latest recognition overwrites), served from /config/www → /local. Best-effort
-# throughout: a capture failure never affects recognition. Cache:
-#   {norm_name: {"url": "/local/...", "path": str, "ts": epoch, "camera_entity": str}}
+# (latest recognition overwrites). A2: frames live OUTSIDE the web root, under
+# <config>/jarvis/snapshots/faces/, and are served only through the authenticated
+# view in snapshot_view.py (/api/jarvis/snapshot/faces/<norm>.jpg) — never via
+# the unauthenticated /local path. Pre-A2 files under <config>/www/jarvis/faces
+# are not migrated; index entries that still carry a /local URL are dropped on
+# restore and re-pin on the next sighting. Best-effort throughout: a capture
+# failure never affects recognition. Cache:
+#   {norm_name: {"url": "/api/jarvis/snapshot/faces/...", "path": str, "ts": epoch,
+#                "camera_entity": str}}
 _FACE_SNAPSHOTS: dict[str, dict] = {}
-FACE_SNAPSHOT_URL_BASE = "/local/jarvis/faces"
+FACE_SNAPSHOT_KIND = "faces"
+FACE_SNAPSHOT_URL_BASE = _snapshot_url_base(FACE_SNAPSHOT_KIND)
 _FACE_SNAP_THROTTLE = 300.0   # re-pin a given person at most this often (secs)
 _MAX_FACE_SNAPSHOTS = 60      # prune beyond this many files
 
@@ -236,10 +248,16 @@ def _persist_load() -> None:
         for key, snap in (data.get("snapshots") or {}).items():
             try:
                 path = snap.get("path")
+                url = str(snap.get("url", ""))
+                # A2: a pin persisted before snapshots moved off /local points
+                # at a file the authenticated view will not serve — drop it;
+                # the person re-pins on their next confident sighting.
+                if not url.startswith(FACE_SNAPSHOT_URL_BASE + "/"):
+                    continue
                 # Only restore a pin whose frame still exists on disk.
                 if path and os.path.exists(path) and key not in _FACE_SNAPSHOTS:
                     _FACE_SNAPSHOTS[key] = {
-                        "url": str(snap.get("url", "")),
+                        "url": url,
                         "path": path,
                         "ts": float(snap.get("ts", 0.0) or 0.0),
                         "camera_entity": str(snap.get("camera_entity", "")),
@@ -474,7 +492,7 @@ async def capture_face_snapshot(hass, camera: str, name: str) -> Optional[dict]:
         except Exception:
             pass
         key = _face_norm(name)
-        snap_dir = config_path_str("www", "jarvis", "faces", hass=hass)
+        snap_dir = config_path_str("jarvis", "snapshots", FACE_SNAPSHOT_KIND, hass=hass)
         path = os.path.join(snap_dir, f"{key}.jpg")
         await hass.async_add_executor_job(_store_face_snapshot, path, content)
         rec = {
@@ -624,7 +642,7 @@ async def capture_unknown_snapshot(hass, camera: str, image_b64: str) -> Optiona
             pass
         from .paths import config_path_str as _cps
         key = f"unknown_{_face_norm(entity_id.split('.', 1)[-1])}" or "unknown"
-        snap_dir = _cps("www", "jarvis", "faces", hass=hass)
+        snap_dir = _cps("jarvis", "snapshots", FACE_SNAPSHOT_KIND, hass=hass)
         path = os.path.join(snap_dir, f"{key}.jpg")
         await hass.async_add_executor_job(_store_face_snapshot, path, content)
         url = f"{FACE_SNAPSHOT_URL_BASE}/{key}.jpg"

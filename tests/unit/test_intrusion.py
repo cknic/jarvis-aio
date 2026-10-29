@@ -89,9 +89,12 @@ async def test_capture_snapshot_writes_file(intr, tmp_path):
 
     assert info is not None
     assert info["camera"] == "camera.dining_room"
-    assert info["url"].startswith("/local/jarvis/intrusion/")
+    # A2: served through the authenticated view, never /local
+    assert info["url"].startswith("/api/jarvis/snapshot/intrusion/")
+    assert info["url"].endswith(".jpg")
     import os
     assert os.path.exists(info["path"])
+    assert os.path.dirname(info["path"]) == str(tmp_path / "snaps")
     assert intr.last_snapshot()["camera"] == "camera.dining_room"
 
 

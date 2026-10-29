@@ -1,0 +1,252 @@
+# JARVIS — stock Lovelace dashboard (no custom frontend).
+#
+# Everything here is a built-in Home Assistant card, so it follows whatever
+# theme you use (light, dark, or auto) with nothing extra to install.
+#
+# ENTITY-ID ASSUMPTION
+# The JARVIS integration (Phase 1 of the fork) creates its entities on a single
+# device named "JARVIS" with has_entity_name=True. Home Assistant therefore
+# builds each entity id as <domain>.jarvis_<entity name>, giving ids such as:
+#   sensor.jarvis_observer, sensor.jarvis_llm_providers, sensor.jarvis_broadcast,
+#   sensor.jarvis_notify, sensor.jarvis_satellites, sensor.jarvis_suggestions,
+#   select.jarvis_mode, binary_sensor.jarvis_asleep,
+#   binary_sensor.jarvis_<area>_occupied, alarm_control_panel.jarvis_lockdown,
+#   event.jarvis_activity, switch.jarvis_observer
+# If you renamed an entity, or your entity ids differ, open
+# Settings -> Devices & services -> JARVIS and adjust the ids below.
+# docs/native-entities.md lists every entity and what it reads/writes.
+#
+# IMPORT
+# Settings -> Dashboards -> Add dashboard -> "New dashboard from scratch" ->
+# open it -> pencil (Edit) -> three-dot menu -> "Raw configuration editor" ->
+# replace the contents with this file -> Save.
+#
+# Chat is NOT on this dashboard: talk to JARVIS through Home Assistant's own
+# Assist dialog (the chat bubble in the top bar, or a voice satellite) with
+# the "JARVIS" conversation agent selected in your Assist pipeline.
+
+title: JARVIS
+views:
+  - title: JARVIS
+    path: jarvis
+    icon: mdi:robot-outline
+    type: sections
+    max_columns: 4
+
+    # ── Top-bar badges: the three things you glance at ─────────────────────
+    badges:
+      - type: entity
+        entity: sensor.jarvis_observer
+        name: Observer
+        show_name: true
+        show_state: true
+        show_icon: true
+      - type: entity
+        entity: select.jarvis_mode
+        name: Mode
+        show_name: true
+        show_state: true
+        show_icon: true
+      - type: entity
+        entity: binary_sensor.jarvis_asleep
+        name: Sleep
+        show_name: true
+        show_state: true
+        show_icon: true
+
+    sections:
+      # ── Security ───────────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Security
+            heading_style: title
+            icon: mdi:shield-home-outline
+          # Lockdown: arm = engage lockdown, disarm = lift it.
+          - type: tile
+            entity: alarm_control_panel.jarvis_lockdown
+            name: Lockdown
+            features:
+              - type: alarm-modes
+                modes:
+                  - armed_away
+                  - disarmed
+          # Last 24 h of JARVIS activity, lockdown changes and mode changes.
+          - type: logbook
+            title: Activity
+            hours_to_show: 24
+            entities:
+              - event.jarvis_activity
+              - alarm_control_panel.jarvis_lockdown
+              - select.jarvis_mode
+
+      # ── Status ─────────────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Status
+            heading_style: title
+            icon: mdi:heart-pulse
+          - type: entities
+            title: JARVIS
+            state_color: true
+            entities:
+              - entity: sensor.jarvis_observer
+                name: Observer
+              - entity: sensor.jarvis_llm_providers
+                name: LLM providers
+              - entity: sensor.jarvis_broadcast
+                name: Broadcast group
+              - entity: sensor.jarvis_notify
+                name: Notifications
+              - entity: sensor.jarvis_satellites
+                name: Voice satellites
+              - entity: binary_sensor.jarvis_asleep
+                name: Household asleep
+              - entity: select.jarvis_mode
+                name: Mode
+              - entity: switch.jarvis_observer
+                name: Observer enabled
+          # Quick actions. Service names and fields come from
+          # custom_components/jarvis/services.yaml (briefing, nap, unshush).
+          - type: horizontal-stack
+            cards:
+              - type: button
+                name: Briefing
+                icon: mdi:newspaper-variant-outline
+                show_name: true
+                show_icon: true
+                tap_action:
+                  action: perform-action
+                  perform_action: jarvis.briefing
+                  data:
+                    announce: true
+              - type: button
+                name: Nap 30 min
+                icon: mdi:sleep
+                show_name: true
+                show_icon: true
+                tap_action:
+                  action: perform-action
+                  perform_action: jarvis.nap
+                  data:
+                    duration_minutes: 30
+              - type: button
+                name: Unshush
+                icon: mdi:volume-high
+                show_name: true
+                show_icon: true
+                tap_action:
+                  action: perform-action
+                  perform_action: jarvis.unshush
+                  confirmation:
+                    text: Clear every mute JARVIS is holding?
+
+      # ── Rooms ──────────────────────────────────────────────────────────
+      # Rooms are specific to your home, so add one area card per room using
+      # this template. `area` is the Home Assistant AREA ID (lower-case,
+      # underscores: find it in Settings -> Areas -> <room> -> the URL).
+      # The occupancy alert lights up from binary_sensor.jarvis_<area>_occupied
+      # (device_class occupancy) and any other occupancy/motion sensors in the
+      # area; the toggle switches the area's lights.
+      #
+      #   - type: area
+      #     area: <area_id>
+      #     navigation_path: ""          # or a view path to open on tap
+      #     show_camera: false
+      #     alert_classes:
+      #       - occupancy
+      #     sensor_classes:
+      #       - temperature
+      #       - humidity
+      #     toggle_domains:
+      #       - light
+      #
+      - type: grid
+        cards:
+          - type: heading
+            heading: Rooms
+            heading_style: title
+            icon: mdi:floor-plan
+          - type: area
+            area: kitchen
+            show_camera: false
+            alert_classes:
+              - occupancy
+            sensor_classes:
+              - temperature
+              - humidity
+            toggle_domains:
+              - light
+          - type: area
+            area: living_room
+            show_camera: false
+            alert_classes:
+              - occupancy
+            sensor_classes:
+              - temperature
+              - humidity
+            toggle_domains:
+              - light
+
+      # ── Climate ────────────────────────────────────────────────────────
+      # Swap in your own temperature sensors. The area rows in the JARVIS
+      # snapshot expose which entity each room uses (temp_entity), and the
+      # panel's Rooms tab names them too.
+      - type: grid
+        cards:
+          - type: heading
+            heading: Temperature (24 h)
+            heading_style: title
+            icon: mdi:thermometer
+          - type: history-graph
+            hours_to_show: 24
+            entities:
+              - entity: sensor.kitchen_temperature
+                name: Kitchen
+              - entity: sensor.living_room_temperature
+                name: Living room
+
+      # ── Suggestions ────────────────────────────────────────────────────
+      # sensor.jarvis_suggestions holds the pending automation suggestions in
+      # its `items` attribute (id, description, confidence, count, ...).
+      # Review/apply them in the admin panel; this card only lists them.
+      - type: grid
+        cards:
+          - type: heading
+            heading: Suggestions
+            heading_style: title
+            icon: mdi:lightbulb-on-outline
+          - type: markdown
+            title: Learned patterns
+            content: |
+              {% set items = state_attr('sensor.jarvis_suggestions', 'items') or [] %}
+              {%- if items %}
+              {%- for s in items %}
+              {%- if s is mapping %}
+              - **{{ s.description or s.id }}**
+              {%- if s.confidence is number %} — {{ (s.confidence * 100) | round(0) | int }}% confident{% endif %}
+              {%- if s.count %}, seen {{ s.count }}×{% endif %}
+              {%- if s.why_headline %} — _{{ s.why_headline }}_{% endif %}
+              {%- else %}
+              - {{ s }}
+              {%- endif %}
+              {%- endfor %}
+              {%- else %}
+              _No suggestions yet. JARVIS proposes automations here once the Observer has seen a pattern repeat._
+              {%- endif %}
+
+      # ── Chat ───────────────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Talk to JARVIS
+            heading_style: title
+            icon: mdi:chat-outline
+          - type: markdown
+            content: >-
+              Chat lives in Home Assistant's **Assist** dialog, not on this
+              dashboard. Open it from the chat bubble in the top bar (or press
+              <kbd>A</kbd>), pick the pipeline whose conversation agent is
+              **JARVIS**, and type or speak. Voice satellites running that
+              pipeline reach the same agent.

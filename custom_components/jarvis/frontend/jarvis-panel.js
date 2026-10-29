@@ -8201,9 +8201,36 @@ ${this._renderExcludedEntities(d)}
       if (side) side.textContent = `${L.labeled || 0}/${L.events || 0} LABELLED`;
       body.innerHTML = this._renderIntrusionLog(res);
       this._wireIntrusionLabels();
+      this._signSnapshotImgs(body);
     } catch (err) {
       body.innerHTML = `<div class="mmwave-empty">Could not load the log.</div>`;
     }
+  }
+
+  // A2: snapshots are served from the authenticated /api/jarvis/snapshot/...
+  // view, and an <img src> cannot carry a bearer token — so ask the frontend
+  // for a short-lived signed URL first. Non-/api paths (legacy /local, data:)
+  // and any signing failure fall back to the raw path.
+  async _signedUrl(path) {
+    if (!path) return "";
+    if (!this._hass || !/^\/api\//.test(path)) return path;
+    try {
+      const res = await this._hass.callWS({ type: "auth/sign_path", path, expires: 300 });
+      return (res && res.path) || path;
+    } catch (_) {
+      return path;
+    }
+  }
+
+  // Fill `src` on every <img data-snap-path> under `root` once its path is signed.
+  _signSnapshotImgs(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll("img[data-snap-path]").forEach(img => {
+      const path = img.getAttribute("data-snap-path");
+      this._signedUrl(path).then(url => {
+        if (url && img.isConnected) img.src = url;
+      });
+    });
   }
 
   _renderIntrusionLog(res) {
@@ -8227,7 +8254,7 @@ ${this._renderExcludedEntities(d)}
           <span class="ilog-when">${this._esc(when)}</span>
         </div>
         <div class="ilog-what">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
-        ${e.snapshot_url ? `<img class="ilog-snap" src="${this._esc(e.snapshot_url)}" alt="snapshot">` : ""}
+        ${e.snapshot_url ? `<img class="ilog-snap" data-snap-path="${this._esc(e.snapshot_url)}" alt="snapshot">` : ""}
         <div class="ilog-actions">
           <button class="ilog-btn ilog-real ${label === "real" ? "ilog-on" : ""}" data-label="real">REAL</button>
           <button class="ilog-btn ilog-false ${label === "false" ? "ilog-on" : ""}" data-label="false">FALSE ALARM</button>
@@ -8636,6 +8663,8 @@ ${this._renderExcludedEntities(d)}
     // Fill each card's snapshot from the camera that saw the subject.
     body.querySelectorAll("img[data-faces-cam]").forEach(img =>
       this._loadFaceSnap(img.getAttribute("data-faces-cam"), img));
+    // Pinned snapshots come from the authenticated view: sign, then set src (A2).
+    this._signSnapshotImgs(body);
     // …and show the enrolled reference photo on residents with no live sighting
     // (#394: the uploaded snapshot must actually appear on the card).
     body.querySelectorAll("img[data-faces-refimg]").forEach(img =>
@@ -8826,7 +8855,7 @@ ${this._renderExcludedEntities(d)}
     // reference photo the user uploaded (#394: it must actually show up) → a
     // live frame from the camera that saw them → an initial-letter avatar.
     const thumb = snapshot_url
-      ? `<img class="faces-thumb-img" src="${this._esc(snapshot_url)}" alt="${safe}"/>`
+      ? `<img class="faces-thumb-img" data-snap-path="${this._esc(snapshot_url)}" alt="${safe}"/>`
       : (has_ref && ref_name)
         ? `<img class="faces-thumb-img" data-faces-refimg="${this._esc(ref_name)}" alt="${safe}" style="display:none"/><div class="faces-thumb-ph">${initial}</div>`
         : camera_entity

@@ -29,22 +29,47 @@ def test_reasoning_cache_stats_does_not_clobber_cache(load):
 
 
 # ── ha_secrets caches the default secrets file ───────────────────────────────
+# Fork (Phase 0): the cache is keyed on the file's (mtime_ns, size) stamp, so
+# repeated reads of an unchanged file are served from memory (one os.stat, no
+# YAML parse) while a rewrite on disk is picked up on the next call. The
+# blocking-I/O property this file guards is "no re-parse on every call", so the
+# parse is counted rather than asserting the stale value is served.
+def _count_parses(hs, monkeypatch):
+    calls = {"n": 0}
+    real = hs._load_secrets
+
+    def counting(path):
+        calls["n"] += 1
+        return real(path)
+
+    monkeypatch.setattr(hs, "_load_secrets", counting)
+    return calls
+
+
 def test_ha_secrets_caches_default_path(load, tmp_path, monkeypatch):
     hs = load("ha_secrets")
     p = tmp_path / "secrets.yaml"
     p.write_text("jarvis_api_key: abc123\n")
     monkeypatch.setattr(hs, "SECRETS_PATH", p)
     hs._reset_secrets_cache()
+    calls = _count_parses(hs, monkeypatch)
 
     first = hs._read_secrets()                    # reads file (path=None -> SECRETS_PATH)
     assert first == {"jarvis_api_key": "abc123"}
+    assert calls["n"] == 1
 
-    p.write_text("jarvis_api_key: CHANGED\n")     # change on disk
-    cached = hs._read_secrets()                    # cached -> old value, no re-read
+    cached = hs._read_secrets()                    # unchanged on disk -> served from cache
     assert cached == {"jarvis_api_key": "abc123"}
+    assert calls["n"] == 1                         # no re-parse
 
-    forced = hs._read_secrets(force=True)          # force re-read
+    p.write_text("jarvis_api_key: CHANGED\n")     # change on disk -> stamp differs
+    fresh = hs._read_secrets()                     # exactly one re-parse
+    assert fresh == {"jarvis_api_key": "CHANGED"}
+    assert calls["n"] == 2
+
+    forced = hs._read_secrets(force=True)          # force always re-parses
     assert forced == {"jarvis_api_key": "CHANGED"}
+    assert calls["n"] == 3
 
 
 def test_ha_secrets_explicit_path_not_cached(load, tmp_path, monkeypatch):
@@ -52,9 +77,9 @@ def test_ha_secrets_explicit_path_not_cached(load, tmp_path, monkeypatch):
     hs._reset_secrets_cache()
     p = tmp_path / "other.yaml"
     p.write_text("k: v1\n")
-    r1 = hs._read_secrets(p)                        # explicit path -> not cached
+    r1 = hs._read_secrets(p)                        # explicit path -> cached by stamp too
     p.write_text("k: v2\n")
-    r2 = hs._read_secrets(p)                        # re-reads (explicit paths bypass cache)
+    r2 = hs._read_secrets(p)                        # re-reads because the stamp changed
     assert r1 == {"k": "v1"} and r2 == {"k": "v2"}
 
 

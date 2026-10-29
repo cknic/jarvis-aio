@@ -54,9 +54,10 @@ def test_log_capped(intr):
 
 
 def test_event_carries_snapshot(intr):
-    snap = {"url": "/local/x.jpg", "path": "/config/www/x.jpg", "camera": "camera.kitchen"}
+    snap = {"url": "/api/jarvis/snapshot/intrusion/x.jpg",
+            "path": "/config/jarvis/snapshots/intrusion/x.jpg", "camera": "camera.kitchen"}
     ev = intr.record_event("confirmed", snapshot=snap)
-    assert ev["snapshot_url"] == "/local/x.jpg"
+    assert ev["snapshot_url"] == "/api/jarvis/snapshot/intrusion/x.jpg"
     assert ev["camera"] == "camera.kitchen"
 
 

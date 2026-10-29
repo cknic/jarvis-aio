@@ -188,7 +188,7 @@ def test_should_capture_face_gate_and_throttle(recog):
     # A fresh, known name is eligible…
     assert mod._should_capture_face("Sam") is True
     # …but once pinned recently it's throttled.
-    mod._FACE_SNAPSHOTS[mod._face_norm("Sam")] = {"url": "/local/x.jpg", "ts": __import__("time").time()}
+    mod._FACE_SNAPSHOTS[mod._face_norm("Sam")] = {"url": "/api/jarvis/snapshot/faces/sam.jpg", "ts": __import__("time").time()}
     assert mod._should_capture_face("Sam") is False
     # An old pin is eligible again.
     mod._FACE_SNAPSHOTS[mod._face_norm("Sam")]["ts"] = 0
@@ -199,12 +199,12 @@ def test_recent_faces_includes_pinned_snapshot_url(recog, fake_hass):
     mod, fr = recog
     fr.add_resident("Sam")
     mod._FACE_SNAPSHOTS[mod._face_norm("Sam")] = {
-        "url": "/local/jarvis/faces/sam.jpg", "ts": _now().timestamp()}
+        "url": "/api/jarvis/snapshot/faces/sam.jpg", "ts": _now().timestamp()}
     _cache(mod, "camera.front_door", "Sam", 92.0, age_seconds=10)
     _cache(mod, "camera.driveway", "Unknown", 0.0, age_seconds=30)
 
     rows = {r["name"]: r for r in mod.recent_faces(fake_hass)}
-    assert rows["Sam"]["snapshot_url"] == "/local/jarvis/faces/sam.jpg"
+    assert rows["Sam"]["snapshot_url"] == "/api/jarvis/snapshot/faces/sam.jpg"
     # Unknown faces never carry a pinned snapshot.
     assert rows["Unknown"]["snapshot_url"] is None
 
@@ -234,15 +234,23 @@ async def test_capture_face_snapshot_pins_and_caches(load, recog, fake_hass, tmp
     mod, _ = recog
     # Point the servable dir at a tmp path and feed a fake camera frame.
     paths = load("paths")
-    monkeypatch.setattr(paths, "config_path_str", lambda *a, **k: str(tmp_path))
+    parts_seen = []
+
+    def _cps(*parts, **k):
+        parts_seen.append(parts)
+        return str(tmp_path)
+    monkeypatch.setattr(paths, "config_path_str", _cps)
     _install_fake_camera(monkeypatch)
 
     rec = await mod.capture_face_snapshot(fake_hass, "front_door", "Sam")
     assert rec is not None
-    assert rec["url"] == "/local/jarvis/faces/sam.jpg"
-    assert mod.face_snapshot_url("sam") == "/local/jarvis/faces/sam.jpg"
-    # The file was actually written to the servable dir.
+    # A2: URL goes through the authenticated view, not /local.
+    assert rec["url"] == "/api/jarvis/snapshot/faces/sam.jpg"
+    assert mod.face_snapshot_url("sam") == "/api/jarvis/snapshot/faces/sam.jpg"
+    # The file was actually written, under the private snapshot dir (not www/).
     assert os.path.exists(os.path.join(str(tmp_path), "sam.jpg"))
+    assert ("jarvis", "snapshots", "faces") in parts_seen
+    assert not any("www" in p for p in parts_seen)
 
 
 async def test_capture_face_snapshot_skips_unknown(recog, fake_hass):
@@ -353,12 +361,12 @@ def test_face_reference_name_is_traversal_safe(recog):
 
 def test_remember_unknown_surfaces_labelable_row(recog, fake_hass):
     mod, _ = recog
-    mod.remember_unknown_face("camera.hall", url="/local/jarvis/faces/unknown_hall.jpg")
+    mod.remember_unknown_face("camera.hall", url="/api/jarvis/snapshot/faces/unknown_hall.jpg")
     rows = mod.recent_faces(fake_hass)
     unk = [r for r in rows if r["is_unknown"]]
     assert len(unk) == 1
     assert unk[0]["camera_entity"] == "camera.hall"
-    assert unk[0]["snapshot_url"] == "/local/jarvis/faces/unknown_hall.jpg"
+    assert unk[0]["snapshot_url"] == "/api/jarvis/snapshot/faces/unknown_hall.jpg"
     assert unk[0]["is_resident"] is False
 
 

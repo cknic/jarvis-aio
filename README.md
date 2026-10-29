@@ -74,6 +74,12 @@ The **Residence** tab draws a live 3D model of your home and lights up the rooms
 
 Name each room after its Home Assistant **area** so occupancy lights up the right room. The plan isn't just for show: JARVIS uses which rooms connect to each other to follow a likely route inward when it investigates a possible intrusion.
 
+## Native entities and a stock dashboard
+
+You don't need the JARVIS panel to see or steer JARVIS. The integration also registers a single **JARVIS** device with ordinary Home Assistant entities: status sensors (`sensor.jarvis_observer`, LLM providers, broadcast, notifications, satellites), `binary_sensor.jarvis_asleep` and one `binary_sensor.jarvis_<area>_occupied` per room, `select.jarvis_mode`, `alarm_control_panel.jarvis_lockdown` (arm = lockdown, disarm = lift it), `event.jarvis_activity` for the Logbook, and a switch, select or number for every behaviour setting the panel exposes. They go on any dashboard, into automations and through Assist, and writing to them uses the same path as the panel so the two never disagree.
+
+`examples/jarvis-dashboard.yaml` is a ready-made **sections** dashboard built from stock cards only (it follows your light or dark theme) — paste it into a new dashboard's raw configuration editor and adjust the room area ids. The sidebar panel is now **admin-only**; household members use the entities instead. Chat is Home Assistant's own Assist dialog with the JARVIS agent. Entity-by-entity details, the security changes behind this and the import steps: [Native entities and a stock dashboard](docs/native-entities.md).
+
 ## FAQ
 
 **What is JARVIS, in one sentence?**

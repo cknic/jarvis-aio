@@ -28,13 +28,6 @@ PANEL_WEBCOMPONENT:   Final = "jarvis-panel"
 PANEL_STATIC_URL:     Final = "/jarvis_panel_static"
 PANEL_JS_FILENAME:    Final = "jarvis-panel.js"
 
-# Command Center — the operational HUD (separate sidebar entry, same static dir)
-CMD_URL_PATH:         Final = "jarvis-command"
-CMD_TITLE:            Final = "Command Center"
-CMD_ICON:             Final = "mdi:hexagon-multiple-outline"
-CMD_WEBCOMPONENT:     Final = "jarvis-command"
-CMD_JS_FILENAME:      Final = "jarvis-command.js"
-
 
 def _remove_panel_if_present(hass: HomeAssistant, url_path: str) -> None:
     """Remove a frontend panel only when it is actually registered.
@@ -89,7 +82,10 @@ async def _register_one(
             sidebar_icon=icon,
             module_url=module_url,
             embed_iframe=False,
-            require_admin=False,
+            # Admin-only: the panel exposes household data (faces, snapshots,
+            # documents, memory) and controls paid work. Household members get
+            # stock HA entities instead (Phase 1), not this panel.
+            require_admin=True,
         )
         _LOGGER.info("JARVIS panel registered: /%s", url_path)
         return True
@@ -130,7 +126,7 @@ async def async_register_panel(hass: HomeAssistant) -> bool:
     # Clean up the old separate Command Center panel from <=6.14.x — it's now
     # folded into the main JARVIS panel, so the standalone entry must go (only
     # if it's actually still registered, else it's just log noise — issue #78).
-    _remove_panel_if_present(hass, CMD_URL_PATH)
+    _remove_panel_if_present(hass, "jarvis-command")
 
     # Single combined panel: the JARVIS Command Center (dashboard + cameras +
     # 3D residence + settings + logs all in one).

@@ -551,6 +551,7 @@ async def async_record_announcement(hass, *, reservation_id: Optional[str] = Non
     await hass.async_add_executor_job(
         partial(_save_announcement_activity, **kwargs)
     )
+    if (bus := getattr(hass, "bus", None)) is not None: bus.async_fire("jarvis_activity", {"urgency": str(kwargs.get("urgency") or "low"), "tag": str(kwargs.get("category") or ""), "message": str(kwargs.get("message") or "")[:300], "entity_id": str(kwargs.get("entity_id") or ""), "source": "observer", "was_spoken": bool(kwargs.get("was_spoken"))})  # fork: mirrors every activity_log row onto the HA bus (event.py / logbook.py)
 
 
 def shush(

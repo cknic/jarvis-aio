@@ -50,6 +50,27 @@ ALARM_ARMED_STATES = {
     "armed_home", "armed_away", "armed_night", "armed_vacation",
     "armed_custom_bypass",
 }
+
+
+# fork Phase 1: alarm_control_panel.jarvis_lockdown MIRRORS the lockdown and
+# marks itself with the state attribute ``jarvis_internal: True``. Every
+# household-alarm sweep below must skip it, otherwise an active lockdown reads
+# back as "alarm armed" (an auto-engaged lockdown could never see the real
+# panel's disarm, and intrusion posture would read AWAY whenever lockdown is on).
+def _is_jarvis_internal(obj) -> bool:
+    """True for a hass State / WorldModel device dict that is one of our own
+    mirror entities (``jarvis_internal`` attribute). Never raises."""
+    try:
+        attrs = obj.get("attributes") if isinstance(obj, dict) else getattr(obj, "attributes", None)
+        return bool(attrs and attrs.get("jarvis_internal"))
+    except Exception:  # noqa: BLE001 — safety read must never raise
+        return False
+
+
+def _household_alarm_states(hass) -> list:
+    """alarm_control_panel states minus JARVIS's own lockdown mirror."""
+    return [st for st in hass.states.async_all("alarm_control_panel")
+            if not _is_jarvis_internal(st)]
 # Arming modes the user chose while HOME. A lockdown auto-engaged from one of
 # these, then held open through a later panel dropout, must NOT be read as "the
 # home is away" for intrusion — the user was home when they armed and the panel
@@ -515,9 +536,9 @@ class SafetyManager:
         # back to the raw sweep on any facade failure (safety read).
         try:
             alarms = [d["state"] for d in WorldModel(self.hass).devices(
-                domain="alarm_control_panel")]
+                domain="alarm_control_panel") if not _is_jarvis_internal(d)]
         except Exception:  # noqa: BLE001 — safety read must never raise
-            alarms = [st.state for st in self.hass.states.async_all("alarm_control_panel")]
+            alarms = [st.state for st in _household_alarm_states(self.hass)]
         return any(s in ALARM_ARMED_STATES for s in alarms)
 
     def _friendly(self, eid: Optional[str]) -> Optional[str]:
@@ -1487,11 +1508,12 @@ class SafetyManager:
             wm = WorldModel(self.hass)
             persons = [d["state"] for d in wm.devices(domain="person")]
             trackers = [d["state"] for d in wm.devices(domain="device_tracker")]
-            alarms = [d["state"] for d in wm.devices(domain="alarm_control_panel")]
+            alarms = [d["state"] for d in wm.devices(domain="alarm_control_panel")
+                      if not _is_jarvis_internal(d)]
         except Exception:  # noqa: BLE001 — safety read must never raise
             persons = [st.state for st in self.hass.states.async_all("person")]
             trackers = [st.state for st in self.hass.states.async_all("device_tracker")]
-            alarms = [st.state for st in self.hass.states.async_all("alarm_control_panel")]
+            alarms = [st.state for st in _household_alarm_states(self.hass)]
         # A resident's device/person reading 'home' wins outright.
         for s in persons:
             if str(s).lower() == "home":
@@ -1655,9 +1677,9 @@ class LockdownManager:
         # back to the raw sweep on any facade failure (safety read).
         try:
             alarms = [d["state"] for d in WorldModel(self.hass).devices(
-                domain="alarm_control_panel")]
+                domain="alarm_control_panel") if not _is_jarvis_internal(d)]
         except Exception:  # noqa: BLE001 — safety read must never raise
-            alarms = [st.state for st in self.hass.states.async_all("alarm_control_panel")]
+            alarms = [st.state for st in _household_alarm_states(self.hass)]
         return any(s in ALARM_ARMED_STATES for s in alarms)
 
     def _anyone_home(self) -> bool:
@@ -4238,6 +4260,10 @@ async def _on_lockdown_state(event) -> None:
         dom = eid.split(".", 1)[0]
         if dom == "alarm_control_panel":
             old = event.data.get("old_state")
+            # Our own lockdown mirror entity changing is an echo of a lockdown
+            # transition, not a household alarm event (fork Phase 1).
+            if _is_jarvis_internal(event.data.get("new_state")) or _is_jarvis_internal(old):
+                return
             # A real arm is disarmed→armed. Entity initialisation on startup
             # (None / unknown / unavailable → armed) is NOT a fresh arm — adopt
             # it silently so reboots don't re-announce.
@@ -4319,7 +4345,7 @@ def _alarm_state_view(hass) -> tuple:
     the integration is down, not the alarm off."""
     armed = False
     disarmed = False
-    for st in hass.states.async_all("alarm_control_panel"):
+    for st in _household_alarm_states(hass):
         s = str(st.state).lower()
         if s in ALARM_ARMED_STATES:
             armed = True
@@ -4337,7 +4363,7 @@ def _armed_mode(hass) -> str:
     'armed_away'), or '' when no panel is readably armed. Used to tell a HOME
     arming posture from an AWAY one for intrusion."""
     try:
-        for st in hass.states.async_all("alarm_control_panel"):
+        for st in _household_alarm_states(hass):
             s = str(st.state).lower()
             if s in ALARM_ARMED_STATES:
                 return s
@@ -4422,13 +4448,22 @@ async def _push_notification(hass, config, message, action_type, snapshot_url=No
 def _notification_image_data(hass, snapshot_url):
     """Build the mobile_app notification `data` block that attaches an image.
     iOS uses `attachment.url`; Android uses `image`. We set both so whichever
-    platform receives it renders the snapshot. Returns {} if no snapshot."""
+    platform receives it renders the snapshot. Returns {} if no snapshot.
+
+    URL shape matters for auth. The companion apps attach the user's token
+    ONLY to relative URLs (Android: ``requiresAuth = !isAbsoluteUrl(url)``;
+    iOS fetches relative paths through its authenticated connection) and
+    resolve them against whichever server URL the phone is currently using,
+    so a relative ``/api/jarvis/snapshot/...`` works on and off LAN. Making
+    it absolute would drop the token and the authenticated snapshot view
+    (A2) would answer 401 — a notification with no still. Only legacy
+    unauthenticated ``/local/`` paths are therefore made absolute."""
     if not snapshot_url:
         return {}
-    # Make the /local path absolute so the companion app can fetch it off-LAN.
     url = snapshot_url
     try:
-        if url.startswith("/"):
+        if url.startswith("/") and not url.startswith("/api/"):
+            # Legacy /local path: absolute so the app can fetch it off-LAN.
             base = ""
             try:
                 base = str(hass.config.external_url or hass.config.internal_url or "").rstrip("/")

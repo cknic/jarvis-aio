@@ -346,3 +346,21 @@ def get_directive(preset_name: str = DEFAULT_DIRECTIVE_PRESET,
             custom = "## PRIME DIRECTIVE — YOUR UNRELENTING CORE PURPOSE\n\n" + custom
         return custom
     return DIRECTIVE_PRESETS.get(preset_name, DIRECTIVE_PRESETS[DEFAULT_DIRECTIVE_PRESET])
+
+
+# ─── Native HA entities (fork Phase 0/1) ─────────────────────────────────────
+# The snapshot coordinator is stored at hass.data[DOMAIN][entry_id][DATA_COORDINATOR].
+DATA_COORDINATOR = "coordinator"
+# Dispatcher signal fired by config_apply.async_apply after a panel-writable key
+# changes; payload is (key, value). Entities that mirror a setting subscribe.
+SIGNAL_CONFIG_CHANGED = f"{DOMAIN}_config_changed"
+COORDINATOR_UPDATE_INTERVAL_S = 20       # polled snapshot cadence (seconds)
+COORDINATOR_DEBOUNCE_S = 2.0             # state_changed → refresh debounce
+# Only state changes in these domains schedule a snapshot refresh.
+COORDINATOR_REFRESH_DOMAINS = frozenset({
+    "light", "lock", "cover", "climate", "sensor", "binary_sensor",
+    "person", "device_tracker", "alarm_control_panel",
+})
+DEVICE_NAME = "JARVIS"
+DEVICE_MANUFACTURER = "jarvis-aio fork"
+DEVICE_MODEL = "AI butler"

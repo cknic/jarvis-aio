@@ -229,3 +229,161 @@ def test_diagnose_lists_similar_names_not_values(hs, tmp_path):
     assert diag["status"] == "missing"
     assert diag["similar"] == ["IMAP_pw", "gmail_password"]
     assert "s3cret" not in str(diag)
+
+
+# ── Parse cache keyed on path + (mtime_ns, size) ─────────────────────────────
+# async_get_provider_key always passes _path_from_hass(hass), so the cache must
+# cover explicit paths too — the panel poll was re-parsing YAML five times per
+# cycle while only the SECRETS_PATH default was cached.
+
+@pytest.fixture
+def count_loads(hs, monkeypatch):
+    """Count calls to the real _load_secrets (the YAML parse)."""
+    calls = []
+    real = hs._load_secrets
+
+    def counting(path):
+        calls.append(str(path))
+        return real(path)
+
+    monkeypatch.setattr(hs, "_load_secrets", counting)
+    hs._reset_secrets_cache()
+    return calls
+
+
+def _bump_mtime(p):
+    """Make the stamp differ even on a coarse-mtime filesystem."""
+    import os
+    st = p.stat()
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+
+
+def test_cache_repeated_reads_unchanged_file_parse_once(hs, tmp_path, count_loads):
+    p = tmp_path / "secrets.yaml"
+    p.write_text("jarvis_openai_api_key: sk-1\n")
+    for _ in range(5):
+        assert hs._read_secrets(p) == {"jarvis_openai_api_key": "sk-1"}
+    assert len(count_loads) == 1
+    # Same file via get_secret_sync / get_provider_key_sync: still no re-parse.
+    assert hs.get_secret_sync("jarvis_openai_api_key", path=p) == "sk-1"
+    assert hs.get_stored_provider_key_sync("openai", path=p) == "sk-1"
+    assert len(count_loads) == 1
+
+
+def test_cache_rewrite_changes_mtime_and_invalidates(hs, tmp_path, count_loads):
+    p = tmp_path / "secrets.yaml"
+    p.write_text("k: v1\n")
+    assert hs._read_secrets(p) == {"k": "v1"}
+    p.write_text("k: v2\n")                        # same size on purpose
+    _bump_mtime(p)
+    assert hs._read_secrets(p) == {"k": "v2"}      # stale entry replaced
+    assert hs._read_secrets(p) == {"k": "v2"}      # and cached again
+    assert len(count_loads) == 2
+
+
+def test_cache_size_change_alone_invalidates(hs, tmp_path, count_loads):
+    import os
+    p = tmp_path / "secrets.yaml"
+    p.write_text("k: short\n")
+    assert hs._read_secrets(p) == {"k": "short"}
+    st = p.stat()
+    p.write_text("k: much-longer-value\n")
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))   # pin the old mtime
+    assert hs._read_secrets(p) == {"k": "much-longer-value"}
+    assert len(count_loads) == 2
+
+
+def test_cache_different_paths_are_separate_entries(hs, tmp_path, count_loads):
+    a = tmp_path / "a.yaml"
+    b = tmp_path / "b.yaml"
+    a.write_text("k: A\n")
+    b.write_text("k: B\n")
+    assert hs._read_secrets(a) == {"k": "A"}
+    assert hs._read_secrets(b) == {"k": "B"}
+    assert hs._read_secrets(a) == {"k": "A"}
+    assert hs._read_secrets(b) == {"k": "B"}
+    assert count_loads == [str(a), str(b)]
+
+
+def test_cache_force_bypasses(hs, tmp_path, count_loads):
+    p = tmp_path / "secrets.yaml"
+    p.write_text("k: v\n")
+    assert hs._read_secrets(p) == {"k": "v"}
+    assert hs._read_secrets(p, force=True) == {"k": "v"}
+    assert hs._read_secrets(p, force=True) == {"k": "v"}
+    assert len(count_loads) == 3
+    assert hs._read_secrets(p) == {"k": "v"}       # forced result was cached
+    assert len(count_loads) == 3
+
+
+def test_cache_default_path_resolves_at_call_time(hs, tmp_path, monkeypatch, count_loads):
+    p1 = tmp_path / "one.yaml"
+    p2 = tmp_path / "two.yaml"
+    p1.write_text("k: one\n")
+    p2.write_text("k: two\n")
+    monkeypatch.setattr(hs, "SECRETS_PATH", p1)
+    assert hs._read_secrets() == {"k": "one"}
+    assert hs._read_secrets() == {"k": "one"}
+    monkeypatch.setattr(hs, "SECRETS_PATH", p2)    # re-pointed default
+    assert hs._read_secrets() == {"k": "two"}
+    assert count_loads == [str(p1), str(p2)]
+
+
+def test_cache_missing_file_cached_then_created_file_picked_up(hs, tmp_path, count_loads):
+    p = tmp_path / "later.yaml"
+    assert hs._read_secrets(p) == {}
+    assert hs._read_secrets(p) == {}
+    assert len(count_loads) == 1                   # "missing" result is cached
+    p.write_text("k: now\n")
+    assert hs._read_secrets(p) == {"k": "now"}     # creation is noticed
+    p.unlink()
+    assert hs._read_secrets(p) == {}               # removal is noticed too
+    assert len(count_loads) == 3
+
+
+def test_cache_set_secret_then_read_is_fresh(hs, tmp_path, count_loads):
+    p = tmp_path / "secrets.yaml"
+    p.write_text("jarvis_api_key: OLD\n")
+    assert hs.get_secret_sync("jarvis_api_key", path=p) == "OLD"
+    assert hs.set_secret_sync("jarvis_api_key", "NEW", path=p) is True
+    assert hs.get_secret_sync("jarvis_api_key", path=p) == "NEW"
+
+
+def test_cache_stat_failure_parses_without_caching(hs, tmp_path, monkeypatch, count_loads):
+    p = tmp_path / "secrets.yaml"
+    p.write_text("k: v\n")
+    monkeypatch.setattr(hs, "_file_stamp", lambda path: None)
+    assert hs._read_secrets(p) == {"k": "v"}
+    assert hs._read_secrets(p) == {"k": "v"}
+    assert len(count_loads) == 2                   # no stamp -> never served stale
+    assert str(p) not in hs._SECRETS_CACHE
+
+
+def test_read_secrets_never_raises_on_odd_path(hs):
+    assert hs._read_secrets(object()) == {}        # Path() would raise TypeError
+
+
+async def test_async_provider_key_poll_parses_once_per_file_change(
+    hs, fake_hass, tmp_path, monkeypatch, count_loads,
+):
+    """What ws_get_panel_data's _configured_providers does every 20 s: one
+    provider-key lookup per provider, all through _path_from_hass(hass)."""
+    p = tmp_path / "home-assistant" / "secrets.yaml"
+    p.parent.mkdir()
+    p.write_text("jarvis_openai_api_key: sk-o\njarvis_gemini_api_key: gk_g\n")
+    fake_hass.config = types.SimpleNamespace(
+        path=lambda name: str(p.parent / name),
+        time_zone="America/New_York",
+    )
+    monkeypatch.setattr(hs, "SECRETS_PATH", tmp_path / "wrong" / "secrets.yaml")
+
+    for _ in range(2):                             # two poll cycles
+        assert await hs.async_get_provider_key(fake_hass, "openai") == "sk-o"
+        assert await hs.async_get_provider_key(fake_hass, "gemini") == "gk_g"
+        assert await hs.async_get_provider_key(fake_hass, "anthropic") == ""
+    assert count_loads == [str(p)]
+
+    p.write_text("jarvis_openai_api_key: sk-o\njarvis_gemini_api_key: gk_g\n"
+                 "jarvis_anthropic_api_key: sk-ant-a\n")
+    assert await hs.async_get_provider_key(fake_hass, "anthropic") == "sk-ant-a"
+    assert count_loads == [str(p), str(p)]

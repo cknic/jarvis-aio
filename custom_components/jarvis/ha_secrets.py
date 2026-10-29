@@ -13,7 +13,9 @@ never raising), so a secrets typo cannot take integration setup down — the sam
 "sideline, don't crash" discipline jarvis_config learned the hard way.
 
 Blocking file I/O is offloaded to HA's executor via async_get_secret; a bare
-synchronous reader is exposed for the executor job and for tests.
+synchronous reader is exposed for the executor job and for tests. Parses are
+cached per path on the file's mtime/size, so the hot async paths cost one
+os.stat() per call rather than a YAML parse.
 
 (v6.81.0 lands the resolver + its first consumer, the mail agent. Migrating the
 existing LLM/observer keys onto it is a separate, isolated change.)
@@ -21,6 +23,7 @@ existing LLM/observer keys onto it is a separate, isolated change.)
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -31,7 +34,16 @@ _LOGGER = logging.getLogger(__name__)
 SECRETS_PATH = config_path("secrets.yaml")
 
 
-_SECRETS_CACHE = None            # cached read of the default SECRETS_PATH
+# Parsed secrets.yaml, keyed on the resolved path string. Each value is
+# (stamp, mapping) where stamp is the file's (st_mtime_ns, st_size) at the time
+# it was parsed, or _MISSING_STAMP when the file did not exist. A read whose
+# os.stat() stamp matches the cached one is served from memory; any rewrite,
+# creation or removal of the file changes the stamp and forces one re-parse.
+# This caches EVERY path (not just SECRETS_PATH): the runtime always reads via
+# _path_from_hass(hass), and the panel's get_panel_data poll was re-parsing the
+# YAML up to five times per cycle without it.
+_SECRETS_CACHE: dict[str, tuple[tuple, dict]] = {}
+_MISSING_STAMP = ("missing",)
 
 
 def _path_from_hass(hass, path: Path | None = None) -> Path | None:
@@ -44,8 +56,22 @@ def _path_from_hass(hass, path: Path | None = None) -> Path | None:
 
 
 def _reset_secrets_cache() -> None:
-    global _SECRETS_CACHE
-    _SECRETS_CACHE = None
+    """Drop every cached parse; the next read of any path hits the disk."""
+    _SECRETS_CACHE.clear()
+
+
+def _file_stamp(path: Path) -> tuple | None:
+    """Cache key for the file's current contents: (mtime_ns, size), or
+    _MISSING_STAMP when it does not exist. None when stat() failed for another
+    reason (permissions, odd path) — the caller then parses without caching.
+    Never raises. Blocking."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return _MISSING_STAMP
+    except Exception:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def _secrets_loader():
@@ -115,17 +141,28 @@ def _read_secrets(path: Path | None = None, force: bool = False) -> dict:
     `path` is resolved at call time (default SECRETS_PATH), not bound at
     definition — otherwise a test monkeypatching SECRETS_PATH wouldn't take,
     the same default-binding trap the DB layer hit.
+
+    Cached per path on the file's (mtime_ns, size): an unchanged file costs one
+    os.stat(), a rewritten or newly created one is re-parsed once, and a missing
+    file caches {} until it appears. `force=True` always re-parses.
     """
-    global _SECRETS_CACHE
-    use_default = path is None
     if path is None:
         path = SECRETS_PATH
-    if (use_default and not force and _SECRETS_CACHE is not None
-            and _SECRETS_CACHE[0] == path):
-        return _SECRETS_CACHE[1]
-    result, _status = _load_secrets(Path(path))
-    if use_default:
-        _SECRETS_CACHE = (path, result)
+    try:
+        path = Path(path)
+    except Exception:
+        return {}
+    key = str(path)
+    # Stat BEFORE parsing: if the file changes between the two, the new content
+    # is stored under the old stamp and the next read simply re-parses.
+    stamp = _file_stamp(path)
+    if not force and stamp is not None:
+        hit = _SECRETS_CACHE.get(key)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+    result, _status = _load_secrets(path)
+    if stamp is not None:
+        _SECRETS_CACHE[key] = (stamp, result)
     return result
 
 
