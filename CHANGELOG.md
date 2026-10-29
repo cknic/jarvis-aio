@@ -180,6 +180,73 @@ doorbell training.
 `manifest.json` still reads `9.39.0`; the fork version is a changelog marker
 until the first tagged fork release.
 
+## [9.41.0] — The kernel authority engine now gates every action (G4b)
+
+JARVIS has long run every consequential action past a kernel **authority engine**
+and *recorded* whether its verdict agreed with the live confirm-gate — enforcing
+only a scoped set of security-sensitive capabilities (locks, alarms). This flips
+the engine to **general enforce**: its verdict now gates **every** actuation
+across every path — `control_device`, `bulk_control`, `execute_plan`,
+`run_scene_or_script`, `set_mode`, and JARVIS's own autonomous (`proactive`)
+actions.
+
+- **Max-restriction belt.** The engine can only ever *add* a confirmation (turn
+  an allow into a hold), **never loosen** the legacy gate. An action proceeds only
+  if the legacy gate allows it **and** the engine returns ALLOW.
+- **Low friction by design.** The engine ALLOWs safe and in-policy sensitive
+  actions at normal confidence, so everyday actions (lights, switches, scenes,
+  modes) are unaffected; only security-sensitive or low-confidence actions are
+  held — the safe direction. For autonomous (`proactive`) actions a held verdict
+  means JARVIS simply doesn't act (there's no one to confirm), so it can never, on
+  its own initiative, do something like unlock a door.
+- **Fail-safe & reversible.** Any engine fault leaves the legacy outcome unchanged
+  (a kernel error can never block a legitimate action). Two kill-switches:
+  `AUTHORITY_ENFORCE_ALL=False` reverts to the scoped security allowlist;
+  `AUTHORITY_ENFORCE=False` reverts to pure log-only parity.
+- **Behavioural kernel coverage rises 55.6% → 59.7%** — the `authority` cell moves
+  from parity to full on all six actuation paths.
+
+## [9.40.0] — Goals: the kernel plan is now authoritative (H4b)
+
+The goal planner completes its arc. A goal has long been expressed as a durable
+kernel **Plan** in the execution journal (built at creation, kept in step-by-step
+sync, then *consulted* each engagement — shadow → parity). This promotes that
+Plan to the **source of truth** for a goal's per-step state, with the goal store
+kept as its current mirror.
+
+- **Journal-authoritative, store-mirrored.** A goal's step transitions now commit
+  to the kernel journal *first*, then project into the goal store; reads overlay
+  the journal's statuses onto the store. The kernel Plan drives the goal's
+  operative state rather than only shadowing it.
+- **No path to losing goal state.** The store is kept as a complete, current
+  mirror, so if the journal has no rows for a goal — a goal created before this
+  release, or a lost/reset `journal.db` — the store stands as the fallback.
+  Creating (or recreating) a goal clears any stale journal rows for its id first,
+  so a reused id can never inherit a prior goal's statuses.
+- **Reversible.** A new `goals_kernel_authoritative` flag (default **on**) falls
+  the whole path back to the previous store-authoritative behaviour without a
+  code change.
+- **Behavioural kernel coverage rises 54.9% → 55.6%** — the `goals` path's `plan`
+  cell moves from parity to full. A closed or cancelled goal's unfinished steps
+  now read as *skipped* (their true terminal state) rather than frozen as pending.
+
+## [9.39.1] — Fix: importing a vacuum map from an official integration (#405)
+
+Importing a floor-plan background from an `image.*` map entity — e.g. the
+Roborock *official* integration's `image.cleaner_living_room_map_0` — failed with
+"✗ Import failed — couldn't read an image", even though the map rendered fine in
+the dashboard.
+
+The importer fetched the entity's image only through its `entity_picture` proxy
+URL, with an in-process fallback for `camera.*` entities but **none for
+`image.*`** — so when the proxy fetch didn't come through (a cached access-token
+that no longer matched, URL/base resolution), an `image.*` import had nothing to
+fall back to. It now reads the bytes through the domain's in-process helper
+(`image`/`camera` `async_get_image`) **first** — the canonical image straight
+from the entity, with no HTTP round-trip or proxy token — and only falls back to
+the `entity_picture` proxy. Vacuum maps from official integrations now import
+cleanly. Behaviour for entities that already worked is unchanged.
+
 ## [9.39.0] — Multi-step plans read the world before each step
 
 The same small completion the autonomous path got in 9.37.0, applied to

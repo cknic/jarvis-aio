@@ -41,7 +41,7 @@ def test_coverage_is_a_sane_percentage(kc):
 
 def test_control_device_authority_and_verify_declared(kc):
     rows = kc.scan()
-    assert rows["control_device"]["authority"] == "parity"
+    assert rows["control_device"]["authority"] == "full"   # G4b general enforce
     assert rows["control_device"]["verify"] == "full"
     # 8.30.0 (MCU Phase A): pre-action context read routes through WorldModel.
     assert rows["control_device"]["world_model"] == "parity"
@@ -56,12 +56,12 @@ def test_control_device_authority_and_verify_declared(kc):
     assert set(rows["homer"].values()) == {"none"}
 
 
-def test_goals_plan_parity_and_event_parity(kc):
-    # goals onto the spine: the goal→Plan is now CONSULTED against the goal store
-    # each engagement (parity, _plan_parity), and the goal.transition events are
-    # parity.
+def test_goals_plan_full_and_event_parity(kc):
+    # goals onto the spine: the kernel journal is now AUTHORITATIVE for a goal's
+    # step state (H4b, _apply_journal_authority) — plan is full — and the
+    # goal.transition events are parity.
     rows = kc.scan()
-    assert rows["goals"]["plan"] == "parity"
+    assert rows["goals"]["plan"] == "full"
     assert rows["goals"]["event"] == "parity"
     # proactive (9.34.0) is now the real discretionary-autonomous device path and
     # routes through the universal actuation seam, so plan is full and event parity.
@@ -78,12 +78,12 @@ def test_proactive_points_at_cognitive_core_and_is_wired(kc):
     # The 'proactive' row names the REAL discretionary-autonomous device path
     # (cognitive_core._execute_action_data), not the proactive_audio TTS path it
     # used to point at. It routes through the universal seam, so plan is full and
-    # the actuation event is published (parity); authority is recorded at parity.
+    # the actuation event is published (parity); authority is ENFORCED (G4b, full).
     assert kc._PATHS["proactive"]["module"] == "cognitive_core.py"
     rows = kc.scan()
     assert rows["proactive"]["plan"] == "full"
     assert rows["proactive"]["event"] == "parity"
-    assert rows["proactive"]["authority"] == "parity"
+    assert rows["proactive"]["authority"] == "full"
     # Verify-after-act for deterministic autonomous targets (9.36.0): the path
     # reads the target back and records the canonical outcome.
     assert rows["proactive"]["verify"] == "full"
