@@ -86,6 +86,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_get_panel_data)
         websocket_api.async_register_command(hass, ws_get_activity_log)
         websocket_api.async_register_command(hass, ws_update_config)
+        websocket_api.async_register_command(hass, ws_config_schema)
         websocket_api.async_register_command(hass, ws_set_lockdown)
         websocket_api.async_register_command(hass, ws_get_knowledge)
         websocket_api.async_register_command(hass, ws_add_knowledge)
@@ -1530,6 +1531,52 @@ async def ws_update_config(
     except Exception as exc:
         _LOGGER.warning("ws_update_config failed: %s", exc)
         connection.send_error(msg["id"], "update_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "jarvis/config_schema",
+})
+@websocket_api.async_response
+async def ws_config_schema(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Typed description of every panel-writable setting plus its current
+    value, for the panel's generated Settings view (fork Phase 2). Admin-only,
+    no arguments. Writes keep going through ``jarvis/update_config``.
+
+    Response ``{"fields": [...], "values": {...}, "categories": [...]}`` is
+    built by :func:`config_apply.build_schema` from the ``FieldSpec`` catalogue
+    and ``PANEL_WRITABLE_KEYS``; each field is ``{key, kind, label, category,
+    default, options, min, max, step, expose}`` (``options`` enum-only,
+    ``min``/``max``/``step`` numbers-only, ``null`` otherwise), ``values`` holds
+    the effective runtime value per field (``runtime_config`` → config.json →
+    entry, coerced to the kind and JSON-safe) and ``categories`` is the ordered
+    list of exposed categories with ``Other`` last. A writable key the
+    catalogue does not describe is emitted best-effort (category ``Other``).
+
+    Secrets: a key whose name contains ``key``, ``token``, ``password`` or
+    ``secret`` is omitted from both ``fields`` and ``values`` unless it is a
+    catalogue entry with ``expose=True`` or a bool/int/float field (a number
+    cannot hold a credential — this keeps ``vision_thinking_max_tokens``); see
+    ``config_apply.looks_secret``. Provider API keys are never panel-writable.
+    Without a config entry the schema still returns, with defaults as values.
+    """
+    try:
+        entry = _get_entry(hass)
+
+        def _resolve(key: str, kind, default):
+            if kind in ("list", "json"):
+                return _get_runtime_json(hass, entry, key, default)
+            return _runtime_opt(hass, entry, key, default)
+
+        connection.send_result(
+            msg["id"], config_apply.build_schema(PANEL_WRITABLE_KEYS, _resolve))
+    except Exception as exc:
+        _LOGGER.exception("ws_config_schema failed: %s", exc)
+        connection.send_error(msg["id"], "config_schema_failed", str(exc))
 
 
 @websocket_api.require_admin

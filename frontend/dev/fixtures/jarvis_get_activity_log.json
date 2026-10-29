@@ -1,0 +1,7 @@
+{
+  "entries": [
+    { "ts": "08:59", "urgency": "low", "tag": "OBS", "msg": "Motion in kitchen" },
+    { "ts": "09:02", "urgency": "medium", "tag": "GOAL", "msg": "Goal #1 engaged quietly" },
+    { "ts": "09:05", "urgency": "high", "tag": "SAFETY", "msg": "Garage door left open" }
+  ]
+}

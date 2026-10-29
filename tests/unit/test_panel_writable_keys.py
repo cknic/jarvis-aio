@@ -5,15 +5,42 @@ that isn't in PANEL_WRITABLE_KEYS, so the write is rejected with `invalid_key`
 and the user sees a save failure (e.g. the Residence tab's HOME STYLE control).
 
 Both sides are parsed statically from source — websocket.py can't be imported
-(heavy HA module-level imports), and the panel is JS.
+(heavy HA module-level imports), and the panel is TypeScript under
+frontend/src (fork Phase 2). The generic Settings view writes whatever
+`jarvis/config_schema` lists — parity of that catalogue with
+PANEL_WRITABLE_KEYS is pinned in test_config_schema_ws.py — so here we check
+the keys the OTHER views name by hand (overview, residence, intrusion).
 """
 import ast
 import re
 from pathlib import Path
 
-_COMPONENT = Path(__file__).resolve().parents[2] / "custom_components" / "jarvis"
-_PANEL_JS = _COMPONENT / "frontend" / "jarvis-panel.js"
+_ROOT = Path(__file__).resolve().parents[2]
+_COMPONENT = _ROOT / "custom_components" / "jarvis"
 _WEBSOCKET = _COMPONENT / "websocket.py"
+_CONFIG_APPLY = _COMPONENT / "config_apply.py"
+_FRONTEND_SRC = _ROOT / "frontend" / "src"
+_SETTINGS_VIEW = _FRONTEND_SRC / "views" / "settings.ts"
+_SETTINGS_PRESENTATION = _FRONTEND_SRC / "views" / "settings" / "presentation.ts"
+_INTRUSION_SETTINGS = _FRONTEND_SRC / "views" / "intrusion" / "settings.ts"
+
+
+def _frontend_sources() -> str:
+    files = sorted(_FRONTEND_SRC.rglob("*.ts"))
+    assert files, f"no panel sources under {_FRONTEND_SRC}"
+    return "\n".join(p.read_text(encoding="utf-8") for p in files)
+
+
+def _catalogue() -> dict[str, str]:
+    """{key: kind} for every FieldSpec in config_apply._FIELDS. The Settings
+    view renders one control per catalogue field (a switch for bool), so a key
+    in the catalogue IS a panel control."""
+    kinds = {"_b": "bool", "_i": "int", "_f": "float", "_e": "enum",
+             "_s": "str", "_l": "list", "_j": "json"}
+    found = re.findall(r'^\s*(_[bifeslj])\(\s*"([a-z0-9_]+)"',
+                       _CONFIG_APPLY.read_text(), re.M)
+    assert found, "FieldSpec catalogue not found in config_apply.py"
+    return {key: kinds[helper] for helper, key in found}
 
 
 def _allowlist() -> set[str]:
@@ -29,11 +56,16 @@ def _allowlist() -> set[str]:
 
 
 def _panel_saved_keys() -> set[str]:
-    """Every literal key the panel persists: _saveConfig('k', …) calls and the
-    data-cfg-key='k' attributes consumed by the generic save handlers."""
-    js = _PANEL_JS.read_text()
-    keys = set(re.findall(r"_saveConfig\(\s*['\"]([a-z0-9_]+)['\"]", js))
-    keys |= set(re.findall(r"data-cfg-key=['\"]([a-z0-9_]+)['\"]", js))
+    """Every literal key a view writes through jarvis/update_config:
+    `"jarvis/update_config", { key: "k", … }` call sites, plus the keys the
+    intrusion settings card passes through its typed key union."""
+    js = _frontend_sources()
+    keys = set(re.findall(
+        r"""jarvis/update_config["']\s*,\s*\{\s*key:\s*["']([a-z0-9_]+)["']""", js))
+    union = re.search(r"type IntrusionSettingKey\s*=([^;]*);",
+                      _INTRUSION_SETTINGS.read_text(encoding="utf-8"))
+    assert union, "IntrusionSettingKey union not found"
+    keys |= set(re.findall(r"""["']([a-z0-9_]+)["']""", union.group(1)))
     return keys
 
 
@@ -75,10 +107,13 @@ def _panel_data_config_keys() -> set[str]:
 
 
 def _panel_read_cfg_keys() -> set[str]:
-    """cfg-field keys the panel reads back via d.config?.KEY — a select/input
-    that saves AND is expected to reflect its saved value on re-render."""
-    js = _PANEL_JS.read_text()
-    return set(re.findall(r"d\.config\?\.([a-z0-9_]+)", js))
+    """Config keys a view reads back from the snapshot (`data.config.KEY`,
+    `cfg.KEY`, `this._config.KEY`, `this._cfg("KEY")`) — a control that saves
+    AND is expected to reflect its saved value on the next snapshot."""
+    js = _frontend_sources()
+    keys = set(re.findall(r"\b(?:cfg|_config|config)\??\.([a-z][a-z0-9_]*)", js))
+    keys |= set(re.findall(r"""_cfg\(\s*["']([a-z0-9_]+)["']""", js))
+    return keys
 
 
 def test_character_and_research_keys_surfaced_in_panel_data():
@@ -140,9 +175,10 @@ def test_v796_agent_keys_are_writable():
 
 
 def test_v796_agent_keys_have_panel_toggles():
-    saved = _panel_saved_keys()
+    # The Settings view renders a switch for every bool field in the catalogue.
+    catalogue = _catalogue()
     for key in _V796_KEYS:
-        assert key in saved, f"panel has no toggle for {key}"
+        assert catalogue.get(key) == "bool", f"panel has no toggle for {key}"
 
 
 def test_v796_keys_in_panel_config_payload_with_defaults():
@@ -157,10 +193,13 @@ def test_v796_keys_in_panel_config_payload_with_defaults():
 
 def test_friday_toggle_is_confirmation_gated():
     # Enabling an actuating sub-agent from the panel must require an explicit
-    # confirm — the button carries data-confirm and the handler honours it.
-    js = _PANEL_JS.read_text()
-    friday_btn = re.search(r'data-cfg-key="friday_automator"[^>]*', js)
-    assert friday_btn and "data-confirm" in friday_btn.group(0), \
-        "FRIDAY toggle must carry data-confirm"
-    assert 'getAttribute("data-confirm")' in js
-    assert "window.confirm(confirmMsg)" in js
+    # confirm — the key is in the Settings view's CONFIRM_ON_ENABLE map and the
+    # save path opens confirmDialog() before writing a bool that turns ON.
+    presentation = _SETTINGS_PRESENTATION.read_text(encoding="utf-8")
+    block = re.search(r"CONFIRM_ON_ENABLE[^=]*=\s*\{(.*?)\n\};", presentation, re.S)
+    assert block, "CONFIRM_ON_ENABLE map not found in settings/presentation.ts"
+    assert re.search(r"^\s*friday_automator\s*:", block.group(1), re.M), \
+        "friday_automator must be confirmation-gated"
+    view = _SETTINGS_VIEW.read_text(encoding="utf-8")
+    assert "CONFIRM_ON_ENABLE[key]" in view
+    assert "confirmDialog(" in view

@@ -1,0 +1,29 @@
+{
+  "running": true,
+  "tick_count": 412,
+  "actions_taken": 9,
+  "offers_made": 3,
+  "autonomous_actions": 2,
+  "autonomy_grants": [],
+  "uptime_hours": 52.4,
+  "last_tick_ago": 41,
+  "certification": {},
+  "learning": {
+    "state_changes": 18422,
+    "commands": 137,
+    "suggestions": 2,
+    "patterns": 6,
+    "days_of_data": 23
+  },
+  "ignore_rules": 4,
+  "last_analysis": {
+    "ts": 1793265000,
+    "patterns_found": 5,
+    "new_suggestions": 2,
+    "person_routines": 3,
+    "facts": 1,
+    "near_misses": [
+      { "type": "time_routine", "description": "Kitchen light on near 06:45", "occurrences": 3, "needed": 4 }
+    ]
+  }
+}

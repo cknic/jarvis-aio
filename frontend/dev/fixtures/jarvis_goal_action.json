@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "goal": {
+    "id": 3,
+    "title": "Keep the garage closed at night",
+    "outcome": "Keep the garage closed at night",
+    "steps": [],
+    "next_check_ts": "2026-10-29 21:30:00.000000",
+    "deadline_ts": null
+  },
+  "goals": [
+    {
+      "id": 3,
+      "title": "Keep the garage closed at night",
+      "outcome": "Keep the garage closed at night",
+      "status": "active",
+      "steps_done": 0,
+      "steps_total": 0,
+      "steps": [],
+      "next_check_ts": "2026-10-29 21:30:00.000000",
+      "deadline_ts": null,
+      "last_result": "",
+      "updated_ts": "2026-10-29 21:00:00.000000"
+    },
+    {
+      "id": 1,
+      "title": "Guest prep",
+      "outcome": "House ready for guests by Saturday",
+      "status": "active",
+      "steps_done": 2,
+      "steps_total": 4,
+      "steps": [
+        { "n": 1, "step": "Check guest room temperature", "status": "done", "note": "" },
+        { "n": 2, "step": "Confirm linens are ready", "status": "done", "note": "" },
+        { "n": 3, "step": "Schedule vacuum for Friday", "status": "pending", "note": "" },
+        { "n": 4, "step": "Set porch light for arrival", "status": "pending", "note": "" }
+      ],
+      "next_check_ts": "2026-10-31 20:00:00.000000",
+      "deadline_ts": "2026-11-01 12:00:00.000000",
+      "last_result": "",
+      "updated_ts": "2026-10-29 09:00:00.000000"
+    },
+    {
+      "id": 2,
+      "title": "Lower evening energy use",
+      "outcome": "Bring evening standby power under 80 W",
+      "status": "done",
+      "steps_done": 3,
+      "steps_total": 3,
+      "steps": [],
+      "next_check_ts": "",
+      "deadline_ts": null,
+      "last_result": "Standby averaged 64 W over the last 3 evenings.",
+      "updated_ts": "2026-10-27 22:10:00.000000"
+    }
+  ]
+}

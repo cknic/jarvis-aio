@@ -1,0 +1,77 @@
+{
+  "calibration": {
+    "n": 142,
+    "good_rate": 0.81,
+    "brier": 0.142,
+    "ece": 0.061,
+    "kind": null,
+    "bins": [
+      {
+        "lo": 0,
+        "hi": 0.2,
+        "count": 0,
+        "mean_confidence": null,
+        "good_rate": null
+      },
+      {
+        "lo": 0.2,
+        "hi": 0.4,
+        "count": 9,
+        "mean_confidence": 0.33,
+        "good_rate": 0.44
+      },
+      {
+        "lo": 0.4,
+        "hi": 0.6,
+        "count": 31,
+        "mean_confidence": 0.52,
+        "good_rate": 0.61
+      },
+      {
+        "lo": 0.6,
+        "hi": 0.8,
+        "count": 58,
+        "mean_confidence": 0.71,
+        "good_rate": 0.84
+      },
+      {
+        "lo": 0.8,
+        "hi": 1,
+        "count": 44,
+        "mean_confidence": 0.9,
+        "good_rate": 0.93
+      }
+    ]
+  },
+  "interruption_budget": {
+    "window_s": 86400,
+    "judged": 37,
+    "good": 30,
+    "unnecessary": 5,
+    "wrong": 2,
+    "unwelcome_rate": 0.19,
+    "multiplier": 0.75,
+    "assessment": "borderline"
+  },
+  "stats": {
+    "total": 210,
+    "judged": 142,
+    "good": 115,
+    "unnecessary": 19,
+    "wrong": 8
+  },
+  "suggestion": {
+    "kind": "suggestion",
+    "judged": 24,
+    "good": 17,
+    "unnecessary": 6,
+    "wrong": 1,
+    "good_rate": 0.71,
+    "unwelcome_rate": 0.29
+  },
+  "suggestion_threshold": {
+    "base": 0.6,
+    "effective": 0.65,
+    "learned_delta": 0.05
+  }
+}

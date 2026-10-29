@@ -1,0 +1,7 @@
+{
+  "briefings": [
+    { "text": "Good morning. It is 7 °C and overcast, with rain expected after 15:00 — take a jacket.\n\nYou have two events today: a dentist appointment at 10:30 and the plumber at 14:00 (the garage door is still open from last night, by the way).\n\nThe guest room heater has been on for 36 hours; shall I turn it off?", "timestamp": "2026-10-29T06:30:12.123456" },
+    { "text": "Good morning. Clear skies today, high of 14 °C.\n\nNothing on the calendar. Trash goes out tonight — it is Tuesday.", "timestamp": "2026-10-28T06:30:09.887120" },
+    { "text": "Good evening. Everyone is home. Doors are locked, the garage is closed, and the upstairs thermostat is set to 19 °C for the night.", "timestamp": "2026-10-27T21:00:02.410001" }
+  ]
+}

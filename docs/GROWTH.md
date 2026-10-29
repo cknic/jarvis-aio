@@ -113,7 +113,7 @@ we tell which ones actually worked.
      philosophy.
 5. **A 60–90 s demo video/GIF at the top of the README.** Every visual in
    the README today is an SVG mockup. The caption even says so. A real
-   screen recording of a voice question, the HUD reacting, and a doorbell
+   screen recording of a voice question, the panel reacting, and a doorbell
    announcement will lift the views → stars conversion on every other
    channel. It's also what gets you a slot in a creator's video.
 6. **HA YouTube creators.** Everything Smart Home, Smart Home Junkie,
@@ -156,7 +156,7 @@ and post a single highlights reply for each.
 
 ## Launch-post draft (HA forum → "Share your Projects!")
 
-Post from the maintainer's account. Swap the placeholder for a real HUD
+Post from the maintainer's account. Swap the placeholder for a real panel
 screenshot first. Reply to the thread for notable releases instead of
 starting new ones.
 
@@ -171,7 +171,7 @@ The best summary came from a user in the HA Facebook group:
 
 That's the core idea: **suggest, don't act.**
 
-[screenshot: the HUD panel]
+[screenshot: the JARVIS panel]
 
 **Install:** it's in the HACS default store. Search **JARVIS AI Assistant**, install, restart, then add it under *Settings → Devices & Services*.
 GitHub: https://github.com/sam3gp8/jarvis-aio
@@ -186,7 +186,7 @@ Most LLM integrations answer when you speak to them. JARVIS does that too (it pl
 - **Cameras (optional).** Doorbell-press analysis, package and mail announcements, and quiet visitor learning, over Frigate (and Nest through it).
 - **Answers from your paperwork.** Drop appliance manuals and receipts into a folder and ask "what filter does the furnace take?"
 - **Knows your calendar.** It flags overlapping and back-to-back events, and can look things up on the web (DuckDuckGo, or your own SearXNG).
-- **Iron Man HUD dashboard**, with a live 3D house, per-room occupancy and an event feed.
+- **An admin panel that looks like Home Assistant** (light and dark), with a live 3D house, per-room occupancy and an event feed — and native entities so the stock dashboard shows JARVIS too.
 
 ### Getting started is small
 

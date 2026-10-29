@@ -83,12 +83,101 @@ administrators. Full entity list and dashboard walkthrough:
   or dark theme and installs by pasting into the raw configuration editor.
 - **Chat moved to Assist.** Conversation is Home Assistant's own Assist dialog
   with the JARVIS agent; the dashboard links to it rather than embedding a chat.
+- **`jarvis/config_schema` WebSocket command (admin-only).** Returns the typed
+  catalogue of every panel-writable setting — `{fields, values, categories}`,
+  each field `{key, kind, label, category, default, options, min, max, step,
+  expose}` with the current effective value — so the panel can generate its
+  Settings view instead of hand-writing one control per key. Secret-looking
+  keys are never included; writes still go through `jarvis/update_config`.
+  Documented in [docs/native-entities.md](docs/native-entities.md#panel-data-api).
 
-What stays panel-only (admins): the floor-plan editor and 3D Residence view,
-faces and voices, documents, LLM provider keys and per-tier model pickers,
-camera diagnostics and doorbell training, and applying suggestions.
+### Phase 2 — the panel
 
-`manifest.json` still reads `9.35.0`; the fork version is a changelog marker
+- **The HUD is gone.** `custom_components/jarvis/frontend/jarvis-panel.js` is
+  no longer the 12k-line hand-written element with the dark-cyan "Iron Man"
+  look (about 500 literal colours, Google Fonts, scanlines, a radar sweep).
+  It is now the esbuild bundle of a Lit 3 / TypeScript panel whose source
+  lives in `frontend/`, written to the same path, so `panel_register.py`
+  (admin-only, `/jarvis_panel_static`, sha1 cache-bust) did not change. The
+  panel has no palette of its own: every `--jv-*` token is derived from Home
+  Assistant theme variables, so it follows HA light, HA dark and user themes,
+  and `npm run lint:theme` plus the smoke test fail on any literal colour or
+  web font. It works at 360 px (the tabs become a bottom nav), is keyboard and
+  screen-reader usable, and feature-detects HA's own elements (`ha-card`,
+  `ha-switch`, `ha-select`, `ha-dialog`, `ha-alert`, …) with token-styled
+  fallbacks.
+- **Seven views**, each a self-contained element with its own loading,
+  empty and error states: **Overview** (status tiles, operational mode,
+  lockdown switch with confirmation, the most active room, nap / unshush,
+  areas with occupancy and per-room lights), **Intrusion** (state with the
+  last still, call off / I'm looking, response settings, the labelled event
+  log), **Suggestions** (evidence, approve / dismiss, goals, learning status
+  and Analyze now), **Memory** (teach and forget facts, person routines,
+  briefings), **Residence** (the 3D model ported to a typed module with a
+  palette derived from the theme at render time, floors, drag or arrow-key
+  rotation, mmWave presence), **Logs** (system log with filters and search,
+  activity feed, diagnostics, cognitive core, governance switches) and
+  **Settings** (generated from `jarvis/config_schema`: grouped, searchable,
+  deep links to `/jarvis/settings/<section>/<key>`, confirmation before
+  enabling FRIDAY, autonomy enforcement or garage suggestions, appliance
+  monitor reload after its keys).
+- **Backend contract unchanged.** The same WebSocket commands
+  (`jarvis/get_panel_data` every 20 s and on `jarvis-refresh`,
+  `jarvis/update_config {key, value}`, the per-view reads and actions),
+  snapshot images through `auth/sign_path`, and the translation files
+  `frontend/i18n/<lang>.json` keyed by the English string.
+- **Tooling.** `cd frontend && npm run all` runs tsc (strict), the theme
+  lint, the build and a jsdom smoke test that mounts every view in light and
+  dark; `npm run dev` is a standalone harness with a mock `hass` answering
+  from `dev/fixtures/`; `frontend/specs/<view>.md` document each view's
+  contract. CI's `frontend` job rebuilds the bundle and fails when the
+  committed one is stale. `scripts/smoke_panel.js` delegates to the new
+  smoke test, and the static tests that grepped the old panel source now
+  read `frontend/src`.
+- **Dropped or deferred to Phase 3** (the Settings view lists them per
+  section as "Not yet ported"): the floor-plan editor, Camera Watch tiles
+  and camera diagnostics, doorbell training, faces and voices, the document
+  library and semantic search, live provider/model pickers, the energy and
+  hazard tools, the mute list, "brief me now" (the `jarvis.briefing` service
+  and the example dashboard button remain), the onboarding card, area
+  sparklines, and all HUD chrome (masthead clock and greeting, global search,
+  gauges, status dump). Chat lives in Assist. Strings new to this panel show
+  in English in every language until the translation pass
+  (`npm run i18n:keys` lists them). The legacy
+  `custom_components/jarvis/frontend/dev/` 3D tools and
+  `scripts/render_residence.js` (which drove the removed HUD element) were
+  removed; the harness renders the model instead.
+  Details: [docs/panel.md](docs/panel.md).
+- **Review fixes (theme, mobile, accessibility, security).** The app bar now
+  keys everything it draws (tab indicator, hover, focus ring, border, status
+  badge) off HA's `--app-header-*` tokens, so a theme with a primary-coloured
+  header keeps a visible selected tab; the HUD-palette PNG logo is replaced
+  by an inline mark in the header text colour. Status text uses new
+  `--jv-*-text` tokens that read at WCAG AA in HA light and dark (the raw
+  state colours stay for dots, bars and filled buttons); captions no longer
+  use HA's disabled-text colour; the dialog scrim is HA's dark dim instead of
+  a text-derived haze; danger buttons use `--ha-color-on-danger-loud`. On a
+  phone the header stays one row (the version lives in Overview), the bottom
+  nav shows the current view's label and icons for the rest below 520 px,
+  focus never lands under the sticky header or bottom nav
+  (`scroll-padding`), the REAL / FALSE ALARM buttons and the settings chips
+  keep their focus ring, and chips, pills, text links, inputs and the
+  governance switch meet the 44 px tap target. The area tile announces its
+  occupancy, the Memory markers have `role="img"`, the 3D scene describes
+  its arrow-key rotation, the settings deep link respects
+  `prefers-reduced-motion`, and the settings rail actually sticks below the
+  app bar. The Residence palette now validates and escapes the theme values
+  it inlines into the SVG, the JSON editor refuses a scalar for a dict/list
+  key, an enum with a stored value outside its options shows the row
+  warning, and the Intrusion Log hides its count on a load error.
+
+What stays panel-only (admins): the 3D Residence view, teaching and forgetting
+facts, labelling intrusion events, applying suggestions, the full settings
+catalogue, logs and the governance switches — and, once Phase 3 ports them,
+the floor-plan editor, faces and voices, documents, camera diagnostics and
+doorbell training.
+
+`manifest.json` still reads `9.39.0`; the fork version is a changelog marker
 until the first tagged fork release.
 
 ## [9.39.0] — Multi-step plans read the world before each step

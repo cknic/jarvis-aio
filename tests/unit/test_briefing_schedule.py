@@ -6,11 +6,18 @@ import json
 import pathlib
 import re
 
-COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "jarvis"
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+COMP = ROOT / "custom_components" / "jarvis"
 INIT = (COMP / "__init__.py").read_text()
 WS = (COMP / "websocket.py").read_text()
 BRIEF = (COMP / "briefing.py").read_text()
-PANEL = (COMP / "frontend" / "jarvis-panel.js").read_text()
+CONFIG_APPLY = (COMP / "config_apply.py").read_text()
+SERVICES = (COMP / "services.yaml").read_text()
+# The Lit panel (fork Phase 2) renders Settings from the config_apply
+# catalogue; the "Brief me now" button is deferred and listed as not ported.
+SETTINGS_PRESENTATION = (ROOT / "frontend" / "src" / "views" / "settings"
+                         / "presentation.ts").read_text(encoding="utf-8")
+EXAMPLE_DASHBOARD = (ROOT / "examples" / "jarvis-dashboard.yaml").read_text()
 
 
 def test_scheduler_uses_clock_time_not_interval():
@@ -63,15 +70,23 @@ def test_briefing_keys_are_surfaced_for_read_back():
 
 
 def test_panel_briefing_toggles_are_wired():
-    # every briefing toggle must carry data-cfg-val or it's inert
+    # every briefing toggle is a bool FieldSpec in the catalogue — the Settings
+    # view renders a switch per catalogue field (and the native switch entity
+    # comes from the same spec), so a key missing here is an inert setting
     for k in ("briefing_morning_enabled", "briefing_evening_enabled",
               "briefing_require_home", "briefing_include_hazards"):
-        m = re.search(r'data-cfg-key="' + k + r'"[^>]*data-cfg-val', PANEL)
-        assert m, f"{k} toggle is not wired"
+        m = re.search(r'^\s*_b\(\s*"' + k + r'"', CONFIG_APPLY, re.M)
+        assert m, f"{k} toggle is not in the config_apply catalogue"
 
 
-def test_panel_has_manual_trigger():
-    assert "brief-now" in PANEL and "_wireBriefings" in PANEL
+def test_manual_trigger_still_reachable():
+    # The old panel's "BRIEF ME NOW" button is deferred to Phase 3 (listed as
+    # not yet ported in the Settings view); the trigger itself stays available
+    # as the jarvis.briefing service and as a button on the example dashboard.
+    assert re.search(r"^briefing:", SERVICES, re.M), "jarvis.briefing service missing"
+    assert "jarvis.briefing" in EXAMPLE_DASHBOARD
+    assert re.search(r'name:\s*"Briefings"', SETTINGS_PRESENTATION), \
+        "Settings view should list Briefings under 'Not yet ported'"
 
 
 # ── v6.78.1 regression guards ────────────────────────────────────────────────

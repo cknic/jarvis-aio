@@ -1,0 +1,87 @@
+{
+  "ok": true,
+  "last_snapshot": {
+    "path": "/config/www/jarvis/intrusion/intrusion_front_door_1793271120.jpg",
+    "url": "/api/jarvis/snapshot/intrusion/intrusion_front_door_1793271120.jpg",
+    "camera": "camera.front_door",
+    "ts": 1793271120
+  },
+  "called_off": false,
+  "acknowledged": false,
+  "suppressed_for": 0,
+  "false_alarms_24h": 1,
+  "suppressed_seconds": 600,
+  "held_seconds": 300,
+  "recorded": { "ts": 1793271120, "reason": "panel", "camera": "camera.front_door" },
+  "events": [
+    {
+      "id": "evt_1793271120_7",
+      "ts": 1793271120.4,
+      "kind": "confirmed",
+      "reason": "vision confirms a person at the front door",
+      "breach": "Front Door",
+      "breach_area": "entryway",
+      "camera": "camera.front_door",
+      "snapshot_url": "/api/jarvis/snapshot/intrusion/intrusion_front_door_1793271120.jpg",
+      "snapshot_path": "/config/www/jarvis/intrusion/intrusion_front_door_1793271120.jpg",
+      "zones": ["Entryway", "Hallway"],
+      "max_depth": 2,
+      "label": null,
+      "pattern": "entryway|5"
+    },
+    {
+      "id": "evt_1793256300_6",
+      "ts": 1793256300.0,
+      "kind": "unresolved",
+      "reason": "no response; unconfirmed activity",
+      "breach": "Garage",
+      "breach_area": "garage",
+      "camera": "camera.garage",
+      "snapshot_url": "/api/jarvis/snapshot/intrusion/intrusion_garage_1793256300.jpg",
+      "snapshot_path": "/config/www/jarvis/intrusion/intrusion_garage_1793256300.jpg",
+      "zones": ["Garage"],
+      "max_depth": 1,
+      "label": "false",
+      "labeled_ts": 1793257000.0,
+      "pattern": "garage|1"
+    },
+    {
+      "id": "evt_1793186000_5",
+      "ts": 1793186000.0,
+      "kind": "investigating",
+      "reason": "motion while away",
+      "breach": "",
+      "breach_area": "living_room",
+      "camera": "",
+      "snapshot_url": "",
+      "snapshot_path": "",
+      "zones": [],
+      "max_depth": null,
+      "label": null,
+      "pattern": "living_room|3"
+    },
+    {
+      "id": "evt_1793096000_4",
+      "ts": 1793096000.0,
+      "kind": "investigating",
+      "reason": "damped (learned benign)",
+      "breach": "Back Door",
+      "breach_area": "kitchen",
+      "camera": "camera.backyard",
+      "snapshot_url": "",
+      "snapshot_path": "",
+      "zones": ["Kitchen"],
+      "max_depth": 1,
+      "label": "false",
+      "labeled_ts": 1793097000.0,
+      "pattern": "kitchen|2"
+    }
+  ],
+  "learning": {
+    "events": 4,
+    "labeled": 2,
+    "patterns": { "garage|1": { "false": 1, "real": 0 }, "kitchen|2": { "false": 3, "real": 0 } },
+    "damped_patterns": ["kitchen|2"],
+    "min_false_to_damp": 3
+  }
+}

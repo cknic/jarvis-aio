@@ -1,0 +1,12 @@
+{
+  "switch": {
+    "key": "continuity_resume",
+    "name": "Cognitive continuity resume",
+    "explanation": "After a restart, resume from the cognitive snapshot - what JARVIS was thinking (intent, chosen plan, beliefs) - not just the goals it had committed to. OFF (default): commitment-only continuity. Safe to enable.",
+    "category": "capability",
+    "phase": "I-B.4",
+    "default": false,
+    "enabled": true,
+    "overridden": true
+  }
+}

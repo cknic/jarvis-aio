@@ -1,0 +1,29 @@
+{
+  "ran": true,
+  "ts": 1793268600,
+  "patterns_found": 4,
+  "new_suggestions": 0,
+  "person_routines": 2,
+  "facts": 0,
+  "near_misses": [
+    { "type": "time_routine", "description": "Kitchen light on near 06:45", "occurrences": 3, "needed": 4 },
+    { "type": "sequence", "description": "TV on, then living room lights dim", "occurrences": 2, "needed": 4 },
+    { "type": "presence", "description": "Thermostat lowered after last departure", "occurrences": 5, "needed": null }
+  ],
+  "state_changes": 18422,
+  "days_of_data": 23,
+  "backfill": { "imported": 312, "entities": 2, "considered": 14 },
+  "diagnostic": {
+    "top_sources": [
+      { "entity_id": "binary_sensor.living_room_occupancy", "changes": 2210 },
+      { "entity_id": "light.kitchen", "changes": 640 }
+    ],
+    "candidates": [
+      { "entity_id": "light.kitchen", "state": "on", "hour": 6, "occurrences": 9, "days": 9, "coverage": 0.39 },
+      { "entity_id": "cover.garage_door", "state": "closed", "hour": 22, "occurrences": 7, "days": 7, "coverage": 0.3 }
+    ],
+    "total_days": 23,
+    "min_days": 12,
+    "min_occurrences": 4
+  }
+}

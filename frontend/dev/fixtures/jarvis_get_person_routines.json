@@ -1,0 +1,12 @@
+{
+  "routines": {
+    "sam_smith": [
+      { "id": 12, "pattern_type": "time_routine", "description": "Sam usually starts the coffee machine around 06:40 on weekdays", "confidence": 0.91, "occurrences": 23, "last_seen": "2026-10-29T06:41:12.511203" },
+      { "id": 15, "pattern_type": "repeated_command", "description": "Sam asks for the weather right after the lights come on in the kitchen", "confidence": 0.74, "occurrences": 11, "last_seen": "2026-10-28T06:52:03.100411" },
+      { "id": 18, "pattern_type": "presence", "description": "Sam leaves the house between 08:10 and 08:25", "confidence": 0.62, "occurrences": 0, "last_seen": "" }
+    ],
+    "alex": [
+      { "id": 21, "pattern_type": "sequence", "description": "Alex turns off the office lights and then starts the living room TV around 18:30", "confidence": 0.83, "occurrences": 9, "last_seen": "2026-10-27T18:33:40.004120" }
+    ]
+  }
+}

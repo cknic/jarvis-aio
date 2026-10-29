@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "appliances": {
+    "running": true,
+    "profile": [
+      { "name": "Washer", "type": "washer", "entity": "sensor.washer_power", "watts": 500 },
+      { "name": "Dryer", "type": "dryer", "entity": "", "watts": 2400 }
+    ],
+    "tracked_sensors": ["sensor.washer_power"],
+    "native": ["sensor.washer_power"],
+    "whole_home": true
+  }
+}

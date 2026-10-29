@@ -13,8 +13,11 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Node (jsdom smoke test installs this locally)
+# Node: the panel toolchain lives in frontend/ (npm ci there); only the
+# built bundle custom_components/jarvis/frontend/jarvis-panel.js is committed.
 node_modules/
+frontend/node_modules/
+frontend/dist/
 
 # JARVIS runtime state (never committed — lives on the HA instance)
 jarvis_config.json

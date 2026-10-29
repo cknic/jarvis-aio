@@ -1,0 +1,60 @@
+{
+  "overall": "warn",
+  "summary": "1 service(s) failing — 7/9 healthy",
+  "services": [
+    {
+      "name": "LLM",
+      "key": "llm",
+      "status": "ok",
+      "detail": "ollama qwen2.5:7b answered in 1.1s"
+    },
+    {
+      "name": "Embeddings",
+      "key": "embeddings",
+      "status": "ok",
+      "detail": "nomic-embed-text, 768 dims"
+    },
+    {
+      "name": "TTS",
+      "key": "tts",
+      "status": "idle",
+      "detail": "piper configured; not used in the last 24h"
+    },
+    {
+      "name": "STT",
+      "key": "stt",
+      "status": "off",
+      "detail": ""
+    },
+    {
+      "name": "Cameras",
+      "key": "cameras",
+      "status": "ok",
+      "detail": "3 cameras, last snapshot 2m ago"
+    },
+    {
+      "name": "Routines",
+      "key": "routines",
+      "status": "warn",
+      "detail": "1 routine failed on its last run (morning_brief)"
+    },
+    {
+      "name": "Conversation store",
+      "key": "database",
+      "status": "ok",
+      "detail": "jarvis.db 48 MB, 12,431 rows"
+    },
+    {
+      "name": "Scheduler",
+      "key": "scheduler",
+      "status": "ok",
+      "detail": "14 tasks, none failing"
+    },
+    {
+      "name": "Host",
+      "key": "host",
+      "status": "down",
+      "detail": "disk 97% full on /config"
+    }
+  ]
+}

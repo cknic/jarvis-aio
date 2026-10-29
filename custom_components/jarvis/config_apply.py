@@ -424,3 +424,226 @@ def _notify_changed(hass: HomeAssistant, updates: dict) -> None:
             async_dispatcher_send(hass, SIGNAL_CONFIG_CHANGED, k, v)
     except Exception:
         pass
+
+
+# ── Panel schema (fork Phase 2: the ``jarvis/config_schema`` command) ────────
+#
+# The new panel renders its Settings view from a typed description of every
+# panel-writable key instead of hand-written controls. Everything below is pure
+# (no hass): the websocket handler supplies the value resolver.
+
+SCHEMA_OTHER_CATEGORY = "Other"
+SECRET_MARKERS = ("key", "token", "password", "secret")
+_NUMERIC_KINDS = ("int", "float")
+_SCALAR_KINDS = ("bool", "int", "float")
+
+
+def looks_secret(key: str, spec: Optional[FieldSpec] = None) -> bool:
+    """True when ``key`` must be left out of the panel schema altogether.
+
+    A key whose name contains ``key``, ``token``, ``password`` or ``secret``
+    is treated as a credential and is omitted (field *and* value) — unless it
+    is a catalogue :class:`FieldSpec` that is either ``expose=True`` (already
+    a native HA entity) or of a bool/int/float kind: a number or a flag cannot
+    carry a credential, and this keeps ``vision_thinking_max_tokens`` (a token
+    *budget*) in the schema. Provider API keys live in ``secrets.yaml`` and are
+    never panel-writable, so today the rule only guards against a future key
+    being added to ``PANEL_WRITABLE_KEYS`` without a catalogue entry."""
+    name = key.lower()
+    if not any(marker in name for marker in SECRET_MARKERS):
+        return False
+    if spec is not None and (spec.expose or spec.kind in _SCALAR_KINDS):
+        return False
+    return True
+
+
+def humanise_key(key: str) -> str:
+    """``floor_plan_sqft`` → ``Floor plan sqft`` (best-effort label)."""
+    return key.replace("_", " ").strip().capitalize() or key
+
+
+def json_safe(value: Any) -> Any:
+    """Coerce a config value into plain JSON types: sets/tuples become lists,
+    dict keys become strings, anything exotic becomes ``str(value)``."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [json_safe(v) for v in value]
+    return str(value)
+
+
+_TRUE_WORDS = ("1", "true", "yes", "on")
+_FALSE_WORDS = ("0", "false", "no", "off", "")
+
+
+def coerce_for_kind(kind: str, value: Any) -> Any:
+    """Best-effort: bring a stored value into the Python type its ``kind``
+    promises (the old panel saved most things as strings; ``runtime_config``
+    may hold JSON text for list/json keys). Unparseable input is returned
+    JSON-safe but otherwise untouched, never raised on."""
+    if value is None:
+        return None
+    try:
+        if kind == "bool":
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)):
+                return bool(value)
+            if isinstance(value, str):
+                low = value.strip().lower()
+                if low in _TRUE_WORDS:
+                    return True
+                if low in _FALSE_WORDS:
+                    return False
+        elif kind == "int":
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                return int(value) if value.is_integer() else value
+            if isinstance(value, str) and value.strip():
+                return int(float(value.strip()))
+        elif kind == "float":
+            if isinstance(value, bool):
+                return float(value)
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str) and value.strip():
+                return float(value.strip())
+        elif kind == "enum":
+            if isinstance(value, bool):
+                return str(value).lower()
+            if isinstance(value, (int, float, str)):
+                return str(value)
+        elif kind == "str":
+            if isinstance(value, (int, float, bool)):
+                return str(value)
+        elif kind in ("list", "json"):
+            if isinstance(value, str):
+                import json as _json
+                parsed = _json.loads(value)
+                if kind == "json" or isinstance(parsed, list):
+                    return json_safe(parsed)
+                return value
+            if kind == "list" and isinstance(value, (tuple, set, frozenset)):
+                return json_safe(value)
+    except Exception:
+        pass
+    return json_safe(value)
+
+
+def field_schema(spec: FieldSpec) -> dict:
+    """The wire shape of one catalogue field (see :func:`build_schema`)."""
+    numeric = spec.kind in _NUMERIC_KINDS
+    return {
+        "key": spec.key,
+        "kind": spec.kind,
+        "label": spec.label or humanise_key(spec.key),
+        "category": spec.category,
+        "default": json_safe(spec.default),
+        "options": list(spec.options) if spec.kind == "enum" and spec.options else None,
+        "min": spec.min if numeric else None,
+        "max": spec.max if numeric else None,
+        "step": spec.step if numeric else None,
+        "expose": bool(spec.expose),
+    }
+
+
+def infer_field(key: str, value: Any) -> dict:
+    """A best-effort field for a writable key the catalogue does not know:
+    kind from the current value's Python type (``json`` for list/dict, ``bool``,
+    ``int``, ``float``, else ``str``), category ``Other``, humanised label."""
+    if isinstance(value, (list, dict, tuple, set, frozenset)):
+        kind = "json"
+    elif isinstance(value, bool):
+        kind = "bool"
+    elif isinstance(value, int):
+        kind = "int"
+    elif isinstance(value, float):
+        kind = "float"
+    else:
+        kind = "str"
+    return {
+        "key": key,
+        "kind": kind,
+        "label": humanise_key(key),
+        "category": SCHEMA_OTHER_CATEGORY,
+        "default": None,
+        "options": None,
+        "min": None,
+        "max": None,
+        "step": None,
+        "expose": False,
+    }
+
+
+def schema_categories(extra: tuple[str, ...] = ()) -> list[str]:
+    """Ordered unique categories as they appear in :func:`exposed_fields`,
+    then any ``extra`` ones not already listed, then ``Other`` last."""
+    out: list[str] = []
+    for spec in exposed_fields():
+        if spec.category not in out:
+            out.append(spec.category)
+    for cat in extra:
+        if cat not in out and cat != SCHEMA_OTHER_CATEGORY:
+            out.append(cat)
+    out.append(SCHEMA_OTHER_CATEGORY)
+    return out
+
+
+def build_schema(writable, resolve) -> dict:
+    """Build the ``jarvis/config_schema`` response.
+
+    ``writable`` is the panel allow-list (``websocket.PANEL_WRITABLE_KEYS``);
+    ``resolve(key, kind, default)`` returns the current runtime value for one
+    key (the handler wires it to ``_runtime_opt`` / ``_get_runtime_json``;
+    ``kind`` is ``None`` for a key the catalogue does not describe).
+
+    Returns ``{"fields": [...], "values": {...}, "categories": [...]}``:
+
+    * ``fields`` — one entry per writable key, in catalogue order, each
+      ``{key, kind, label, category, default, options, min, max, step, expose}``
+      (``options`` a list of strings for ``enum`` only, ``min``/``max``/``step``
+      for ``int``/``float`` only, ``null`` otherwise). Keys covered by a
+      :class:`FieldSpec` use its typing; any other writable key gets a
+      best-effort :func:`infer_field` entry (category ``Other``).
+    * ``values`` — ``{key: current value}`` for every emitted field, coerced to
+      the field's kind and JSON-safe (sets/tuples → lists).
+    * ``categories`` — :func:`schema_categories`: the exposed categories in
+      order, ``Other`` last.
+
+    Secret-looking keys (see :func:`looks_secret`) are omitted from ``fields``
+    and ``values`` — the panel never receives credentials through this command.
+    """
+    writable = set(writable)
+    fields: list[dict] = []
+    values: dict[str, Any] = {}
+    seen: set[str] = set()
+    extra_categories: list[str] = []
+
+    for spec in _FIELDS:
+        if spec.key not in writable or looks_secret(spec.key, spec):
+            continue
+        seen.add(spec.key)
+        fields.append(field_schema(spec))
+        values[spec.key] = coerce_for_kind(
+            spec.kind, resolve(spec.key, spec.kind, spec.default))
+        if spec.category not in extra_categories:
+            extra_categories.append(spec.category)
+
+    for key in sorted(writable - seen):
+        if looks_secret(key):
+            continue
+        current = resolve(key, None, None)
+        field = infer_field(key, current)
+        fields.append(field)
+        values[key] = coerce_for_kind(field["kind"], current)
+
+    return {
+        "fields": fields,
+        "values": values,
+        "categories": schema_categories(tuple(extra_categories)),
+    }

@@ -102,19 +102,34 @@ jobs:
         run: python -m pytest tests/integration/ -q
 
   frontend:
-    name: Frontend (syntax + smoke)
+    name: Frontend (check + lint + build + smoke)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
-      - name: Panel syntax check
-        run: node --check custom_components/jarvis/frontend/jarvis-panel.js
-      - name: Panel smoke test
-        run: |
-          mkdir -p /tmp/jsdomtest && cd /tmp/jsdomtest
-          npm init -y >/dev/null 2>&1
-          npm install jsdom >/dev/null 2>&1
-          cd "$GITHUB_WORKSPACE"
-          NODE_PATH=/tmp/jsdomtest/node_modules node scripts/smoke_panel.js
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install (locked)
+        run: npm ci
+      - name: Type check
+        run: npm run check
+      - name: Theme lint (no literal colours / web fonts outside tokens.ts)
+        run: npm run lint:theme
+      - name: Build bundle
+        run: npm run build
+      - name: Committed bundle is current
+        # The bundle at custom_components/jarvis/frontend/jarvis-panel.js is
+        # what HACS ships; it must be rebuilt and committed with every source
+        # change. A diff here means `npm run build` was not run.
+        run: git diff --exit-code -- ../custom_components/jarvis/frontend/jarvis-panel.js
+      - name: Bundle is valid JavaScript
+        run: node --check ../custom_components/jarvis/frontend/jarvis-panel.js
+      - name: Panel smoke test (jsdom, light + dark, every view)
+        run: npm run smoke

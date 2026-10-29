@@ -29,6 +29,7 @@ _PANEL_PY = _COMP / "panel_register.py"
 # Pure-read commands that must be admin-only in their entirety.
 ADMIN_ONLY_READ_COMMANDS = [
     "jarvis/get_panel_data",
+    "jarvis/config_schema",
     "jarvis/get_activity_log",
     "jarvis/camera_snapshot",
     "jarvis/get_debug_log",

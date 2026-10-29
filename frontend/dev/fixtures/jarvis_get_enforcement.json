@@ -1,0 +1,104 @@
+{
+  "switches": [
+    {
+      "key": "continuity_resume",
+      "name": "Cognitive continuity resume",
+      "explanation": "After a restart, resume from the cognitive snapshot - what JARVIS was thinking (intent, chosen plan, beliefs) - not just the goals it had committed to. OFF (default): commitment-only continuity. Safe to enable.",
+      "category": "capability",
+      "phase": "I-B.4",
+      "default": false,
+      "enabled": false,
+      "overridden": false
+    },
+    {
+      "key": "agency_orchestration",
+      "name": "Multi-agent orchestration",
+      "explanation": "The kernel is the authority source for delegated sub-agents - it can only narrow a sub-agent's tools, never widen them, and vetoes a spawn it refuses. Turn OFF to revert to the pre-kernel delegation path.",
+      "category": "capability",
+      "phase": "O",
+      "default": true,
+      "enabled": true,
+      "overridden": false
+    },
+    {
+      "key": "knowledge_graph",
+      "name": "Knowledge-graph recall",
+      "explanation": "Serve the knowledge prompt block from the typed knowledge graph. Fail-safe: any failure falls back to flat recall. Turn OFF to revert to plain flat recall.",
+      "category": "capability",
+      "phase": "T",
+      "default": true,
+      "enabled": false,
+      "overridden": true
+    },
+    {
+      "key": "authority",
+      "name": "Capability authority",
+      "explanation": "Enforce capability authority on actuating tools - the max-restriction belt, allowlist and kill-switch that stop an un-authorized action. ON (default) is the safe state; OFF reverts to parity (log-only).",
+      "category": "safety",
+      "phase": "G4",
+      "default": true,
+      "enabled": true,
+      "overridden": false
+    },
+    {
+      "key": "agency_budget",
+      "name": "Autonomy budget ceiling",
+      "explanation": "Block autonomous actions that exceed the configured budget ceiling. ON (default) is the safe state; OFF reverts to shadow (log-only).",
+      "category": "safety",
+      "phase": "G1",
+      "default": true,
+      "enabled": true,
+      "overridden": false
+    },
+    {
+      "key": "loop_detect",
+      "name": "Loop / thrash suppression",
+      "explanation": "Suppress thrashing or looping autonomous actuations. ON (default) is the safe state; OFF reverts to shadow.",
+      "category": "safety",
+      "phase": "G2",
+      "default": true,
+      "enabled": true,
+      "overridden": false
+    },
+    {
+      "key": "safety_seam",
+      "name": "Safety actuator seam",
+      "explanation": "Route safety-critical actuators through the policy-mode seam so the active mode's restrictions always apply. ON (default) is the safe state.",
+      "category": "safety",
+      "phase": "H8",
+      "default": true,
+      "enabled": true,
+      "overridden": false
+    },
+    {
+      "key": "hazard_situation",
+      "name": "Freeze-hazard verdict",
+      "explanation": "Let the kernel own the freeze-hazard verdict (it fails TOWARD alerting). ON (default) is the safe state.",
+      "category": "safety",
+      "phase": "R2",
+      "default": true,
+      "enabled": true,
+      "overridden": false
+    },
+    {
+      "key": "intrusion_gate",
+      "name": "Intrusion verdict",
+      "explanation": "Let the kernel own the intrusion verdict used to arm/alert. ON (default) is the safe state; OFF reverts to the legacy path.",
+      "category": "safety",
+      "phase": "R3",
+      "default": true,
+      "enabled": false,
+      "overridden": true
+    },
+    {
+      "key": "delivery_situation",
+      "name": "Delivery presence verdict",
+      "explanation": "Let the kernel own per-camera delivery presence. ON (default) is the current behaviour; OFF reverts to the legacy per-camera flag.",
+      "category": "safety",
+      "phase": "R1",
+      "default": true,
+      "enabled": true,
+      "overridden": false
+    }
+  ]
+}

@@ -3,10 +3,14 @@ makes a suggestion reviewable instead of a leap of faith. Covers the explainer
 (pure), the schema/persistence of evidence, and the panel wiring."""
 import json
 import pathlib
+import re
 
 import pytest
 
-COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "jarvis"
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+COMP = ROOT / "custom_components" / "jarvis"
+# fork Phase 2: the suggestion card lives in the Lit panel sources
+SUGGESTION_LIST = ROOT / "frontend" / "src" / "views" / "suggestions" / "suggestion-list.ts"
 
 
 @pytest.fixture
@@ -116,19 +120,21 @@ def test_websocket_surfaces_why():
 
 
 def test_panel_renders_evidence():
-    panel = (COMP / "frontend" / "jarvis-panel.js").read_text()
-    assert "why_headline" in panel
-    assert "What JARVIS observed" in panel
-    assert "sug-ev" in panel
-    assert "Create automation" in panel
+    card = SUGGESTION_LIST.read_text(encoding="utf-8")
+    assert "why_headline" in card
+    assert "What JARVIS observed" in card
+    assert "s.evidence" in card
+    assert "Create automation" in card
 
 
 def test_panel_actions_still_wired():
-    # the rich card must keep the classes the action handler binds to
-    panel = (COMP / "frontend" / "jarvis-panel.js").read_text()
-    assert "sug-approve" in panel
-    assert "sug-dismiss" in panel
-    assert "sug-yaml-btn" in panel
+    # approve / dismiss go through jarvis/suggestion_action, and the payload
+    # preview toggle is still there
+    card = SUGGESTION_LIST.read_text(encoding="utf-8")
+    assert "jarvis/suggestion_action" in card
+    assert re.search(r'action:\s*"approve"', card)
+    assert re.search(r'action:\s*"dismiss"', card)
+    assert "Show automation" in card
 
 
 # ── only real automations (trigger + action) are surfaced ────────────────────

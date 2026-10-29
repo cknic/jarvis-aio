@@ -1,0 +1,25 @@
+{
+  "name": "jarvis-panel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "JARVIS Home Assistant panel - Lit + esbuild source. The build output is custom_components/jarvis/frontend/jarvis-panel.js.",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "tsc --noEmit",
+    "lint:theme": "node scripts/lint-theme.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "dev": "node scripts/dev-server.mjs",
+    "i18n:keys": "node scripts/i18n-keys.mjs",
+    "all": "npm run check && npm run lint:theme && npm run build && npm run smoke"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "jsdom": "^26.1.0",
+    "lit": "^3.3.0",
+    "typescript": "~5.9.0"
+  }
+}

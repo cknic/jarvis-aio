@@ -54,7 +54,12 @@ language would otherwise emit English mid-sentence.
 ```bash
 python3 scripts/i18n_coverage.py          # coverage report for both systems
 python3 -m pytest tests/unit/test_notify_i18n.py -q   # notification tables
+cd frontend && npm run i18n:keys          # panel strings with no entry in any language yet
 ```
+
+The panel was rewritten in the fork's Phase 2 and introduced many new English
+strings; `npm run i18n:keys` (after `npm ci` in `frontend/`) lists exactly the
+keys that still need a translation.
 
 The coverage script shows how complete each language is and, for notifications,
 which languages are still welcome. Then open a pull request — thank you! 🙏

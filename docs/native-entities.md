@@ -282,3 +282,31 @@ data:
 
 Everything else — status, occupancy, sleep, mode, lockdown, the common
 behaviour toggles, and the activity log — is a plain entity now.
+
+## Panel data API
+
+The panel reads its state over two admin-only WebSocket commands.
+`jarvis/get_panel_data` (no arguments) returns the full status snapshot the
+coordinator also feeds the entities from — `status`, `meta`, `dominant`,
+`areas`, `config` and the rest — and `jarvis/config_schema` (no arguments)
+returns a typed description of every panel-writable setting:
+`{"fields": [...], "values": {...}, "categories": [...]}`. Each field is
+`{key, kind, label, category, default, options, min, max, step, expose}` where
+`kind` is one of `bool | int | float | enum | str | list | json`, `options` is a
+list of strings for `enum` fields only, `min`/`max`/`step` are set for
+`int`/`float` fields only (`null` otherwise) and `expose` says whether the
+setting also exists as a native entity. `values` maps each field key to its
+current effective value (`runtime_config` → `config.json` → entry, coerced to
+the field's kind), and `categories` is the ordered list of groups
+(`core, voice, learning, safety, cameras, home, governance`) with `Other` last
+for any writable key the catalogue does not describe.
+
+Writes keep using `jarvis/update_config {key, value}`; a key is accepted only
+when it is in the backend's `PANEL_WRITABLE_KEYS` allow-list, which is exactly
+the set of keys `config_schema` describes. The schema never carries
+credentials: a key whose name contains `key`, `token`, `password` or `secret`
+is left out of both `fields` and `values` unless it is an exposed catalogue
+field or a numeric/boolean one (so `vision_thinking_max_tokens`, a token
+budget, stays). Provider API keys are read from `secrets.yaml` and were never
+panel-writable. Both commands require an administrator; a non-admin
+connection receives `unauthorized`.

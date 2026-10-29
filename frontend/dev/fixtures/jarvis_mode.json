@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "mode": "normal",
+  "active": "normal",
+  "since": 1761724800.0,
+  "reason": "auto: home occupied",
+  "description": "Default operation — balanced proactivity and voice.",
+  "overrides": {
+    "proactive": true,
+    "banter": null,
+    "announce_scope": "notable",
+    "auto_actions": true,
+    "quiet": false
+  },
+  "available": [
+    {
+      "name": "away",
+      "description": "Household away — proactive convenience off, security posture emphasized, only notable/critical events."
+    },
+    {
+      "name": "focus",
+      "description": "Deep-focus/work — hold non-critical interrupts, terse tone."
+    },
+    {
+      "name": "guest",
+      "description": "Houseguest staying — softer autonomy, plainer voice, avoid acting on unfamiliar patterns."
+    },
+    {
+      "name": "lab",
+      "description": "Focused workshop/lab work — minimal interruptions, dry tone, safety still fully active."
+    },
+    {
+      "name": "movie",
+      "description": "Movie/theater mode — near-silent, only critical alerts, no convenience chatter."
+    },
+    {
+      "name": "normal",
+      "description": "Default operation — balanced proactivity and voice."
+    },
+    {
+      "name": "party",
+      "description": "Guests over — relax nagging, keep it light, only surface genuinely notable things."
+    }
+  ]
+}

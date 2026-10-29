@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JARVIS panel harness</title>
+    <style>
+      /* Harness chrome only. The panel itself is themed purely from the HA
+         custom properties mock-hass.ts sets on <html>. */
+      html, body { margin: 0; height: 100%; }
+      body { display: flex; flex-direction: column; font: 14px/1.5 var(--ha-font-family-body, sans-serif); }
+      .toolbar {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+        padding: 8px 12px; border-bottom: 1px solid var(--divider-color);
+        background: var(--secondary-background-color); color: var(--primary-text-color);
+        font-size: 12px;
+      }
+      .toolbar strong { margin-right: 8px; }
+      .toolbar button, .toolbar select {
+        font: inherit; min-height: 32px; padding: 0 10px; border-radius: 6px;
+        border: 1px solid var(--divider-color); background: var(--card-background-color); color: inherit; cursor: pointer;
+      }
+      .toolbar button[aria-pressed="true"] { outline: 2px solid var(--primary-color); }
+      .stage { flex: 1 1 auto; display: flex; min-height: 0; }
+      #mount { flex: 1 1 auto; min-width: 0; display: flex; }
+      #mount jarvis-panel { flex: 1 1 auto; height: 100%; }
+      /* narrow: a 390 x 760 phone frame */
+      body[data-narrow] #mount { justify-content: center; align-items: center; background: var(--secondary-background-color); }
+      body[data-narrow] #mount jarvis-panel {
+        flex: none; width: 390px; height: min(760px, 100%);
+        border: 1px solid var(--divider-color); border-radius: 24px; overflow: hidden;
+      }
+      #log {
+        flex: 0 0 300px; max-width: 40vw; margin: 0; padding: 8px 12px; overflow: auto;
+        border-left: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--secondary-text-color);
+        font: 11px/1.4 var(--ha-font-family-code, monospace); white-space: pre-wrap;
+      }
+      body:not([data-log]) #log { display: none; }
+      #log .service { color: var(--primary-color); }
+      #log .fixture-miss, #log .error { color: var(--error-color); }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar" role="toolbar" aria-label="Harness controls">
+      <strong>JARVIS harness</strong>
+      <button id="theme" type="button" aria-pressed="false">Dark</button>
+      <button id="narrow" type="button" aria-pressed="false">Narrow</button>
+      <button id="logbtn" type="button" aria-pressed="false">WS log</button>
+      <label>Language
+        <select id="lang">
+          <option value="en">en</option><option value="de">de</option><option value="fr">fr</option>
+          <option value="es">es</option><option value="nl">nl</option><option value="pt-br">pt-br</option>
+          <option value="zh-hant">zh-hant</option>
+        </select>
+      </label>
+      <button id="refresh" type="button">Refresh snapshot</button>
+      <span id="url" aria-live="polite"></span>
+    </div>
+    <div class="stage">
+      <div id="mount"></div>
+      <pre id="log" aria-live="polite"></pre>
+    </div>
+
+    <!-- The real bundle, at the URL Home Assistant serves it from. -->
+    <script type="module" src="/jarvis_panel_static/jarvis-panel.js"></script>
+    <script type="module">
+      import { createMockHass, applyTheme } from "/mock-hass.js";
+
+      const PREFIX = "/jarvis";
+      const logEl = document.getElementById("log");
+      const hass = createMockHass({
+        language: localStorage.getItem("jv-lang") || "en",
+        darkMode: localStorage.getItem("jv-theme") === "dark",
+        onLog: (e) => {
+          const line = document.createElement("div");
+          line.className = e.kind;
+          line.textContent = `${new Date(e.at).toLocaleTimeString()} ${e.kind.padEnd(7)} ${e.text}`;
+          logEl.appendChild(line);
+          logEl.scrollTop = logEl.scrollHeight;
+        },
+      });
+
+      let dark = hass.themes.darkMode;
+      let narrow = localStorage.getItem("jv-narrow") === "1";
+      applyTheme(document, dark);
+
+      const panel = document.createElement("jarvis-panel");
+      panel.panel = { config: {} };
+      const routeFromLocation = () => {
+        let path = location.pathname.startsWith(PREFIX) ? location.pathname.slice(PREFIX.length) : "";
+        if (!path || path === "/") { history.replaceState(null, "", PREFIX + "/overview"); path = "/overview"; }
+        return { prefix: PREFIX, path };
+      };
+      const syncRoute = () => {
+        panel.route = routeFromLocation();
+        document.getElementById("url").textContent = location.pathname;
+      };
+      // What Home Assistant's router does: re-set `route` on navigation.
+      window.addEventListener("location-changed", syncRoute);
+      window.addEventListener("popstate", syncRoute);
+      syncRoute();
+      panel.narrow = narrow;
+      panel.hass = hass;
+      document.body.toggleAttribute("data-narrow", narrow);
+      document.getElementById("mount").appendChild(panel);
+
+      // HA re-sets `hass` on every state change; emulate a slow heartbeat.
+      setInterval(() => { panel.hass = { ...hass }; }, 5000);
+
+      const themeBtn = document.getElementById("theme");
+      const narrowBtn = document.getElementById("narrow");
+      const logBtn = document.getElementById("logbtn");
+      const langSel = document.getElementById("lang");
+      const paint = () => {
+        themeBtn.setAttribute("aria-pressed", String(dark));
+        themeBtn.textContent = dark ? "Light" : "Dark";
+        narrowBtn.setAttribute("aria-pressed", String(narrow));
+        logBtn.setAttribute("aria-pressed", String(document.body.hasAttribute("data-log")));
+        langSel.value = hass.language;
+      };
+      themeBtn.addEventListener("click", () => {
+        dark = !dark; localStorage.setItem("jv-theme", dark ? "dark" : "light");
+        hass.themes.darkMode = dark; applyTheme(document, dark); panel.hass = { ...hass }; paint();
+      });
+      narrowBtn.addEventListener("click", () => {
+        narrow = !narrow; localStorage.setItem("jv-narrow", narrow ? "1" : "0");
+        document.body.toggleAttribute("data-narrow", narrow); panel.narrow = narrow; paint();
+      });
+      logBtn.addEventListener("click", () => { document.body.toggleAttribute("data-log"); paint(); });
+      langSel.addEventListener("change", () => {
+        hass.setLanguage(langSel.value); localStorage.setItem("jv-lang", langSel.value); panel.hass = { ...hass };
+      });
+      document.getElementById("refresh").addEventListener("click", () => panel.refresh());
+      paint();
+      window.__hass = hass; window.__panel = panel;
+    </script>
+  </body>
+</html>

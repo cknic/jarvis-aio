@@ -6,8 +6,6 @@
 
 An autonomous AI butler for Home Assistant — voice, vision, and a reasoning core that learns your home and watches over it.
 
-<img src="docs/media/residence-3d.png" alt="JARVIS HUD Residence view: a live 3D model of the house with occupied rooms glowing" width="100%">
-
 [![HACS Integration](https://img.shields.io/badge/HACS-Integration-41BDF5?logo=home-assistant&logoColor=white)](https://github.com/sam3gp8/jarvis-aio)
 [![Release](https://img.shields.io/github/v/release/sam3gp8/jarvis-aio?color=00d9ff)](https://github.com/sam3gp8/jarvis-aio/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -27,7 +25,7 @@ JARVIS looks elaborate, but the floor is low — you can be talking to it in fiv
 2. **Add the integration** — *Settings → Devices & Services → Add Integration → JARVIS*. Choose one or more providers in the setup menu, enter and validate each provider's key or endpoint, then choose the Main Agent provider and model. You can use [Groq](https://console.groq.com) (free tier, generous), OpenAI, Anthropic, Gemini, a custom OpenAI-compatible endpoint, or local Ollama.
 3. **That's it.** JARVIS registers its conversation agent and appears in your sidebar. Ask it about your home, your calendar, or the outside world.
 
-Everything past this point — vision, doorbell analysis, the Iron Man HUD's live floor plan, proactive safety — layers on top as you connect cameras and voice. Nothing below is required to start. Jump to [Installation](#installation) for the full walkthrough.
+Everything past this point — vision, doorbell analysis, the panel's live 3D floor plan, proactive safety — layers on top as you connect cameras and voice. Nothing below is required to start. Jump to [Installation](#installation) for the full walkthrough.
 
 ## What it does
 
@@ -47,29 +45,14 @@ Everything past this point — vision, doorbell analysis, the Iron Man HUD's liv
 
 **Safety & security.** Proactive monitoring for freezing pipes, smoke/CO/water, unauthorized entry, and nighttime lockdown — occupancy-gated so enforcement only happens when it should.
 
-**An Iron Man HUD dashboard.** A dark-cyan glassmorphism control panel with a live isometric 3D house, per-room occupancy glow, radial telemetry gauges, an event feed, a doorbell-training view, and surfaced automation suggestions. [Get your own house in 3D →](#your-house-in-3d)
-
-<div align="center">
-<table border="0">
-<tr>
-<td width="30%"><img src="docs/media/activity-feed.png" alt="Activity feed: each home event marked flagged for reasoning or not worth considering" width="100%"></td>
-<td width="70%"><img src="docs/media/areas.png" alt="Areas grid: per-room sensors, occupancy, temperature and humidity" width="100%"></td>
-</tr>
-<tr>
-<td align="center"><em>The Cognitive Core triages every event: routine ones stay silent, unusual ones get a closer look.</em></td>
-<td align="center"><em>Every room at a glance: sensors, live occupancy, temperature and humidity.</em></td>
-</tr>
-</table>
-
-<sub>Screenshots from a live install. The dashboard runs in your browser inside Home Assistant.</sub>
-</div>
+**An admin panel that looks like Home Assistant.** A sidebar panel for administrators that follows your HA theme (light, dark or custom) with a live 3D house and per-room occupancy, intrusion review, automation suggestions with their evidence, JARVIS's memory, logs and every setting — plus native entities so the rest of the household sees JARVIS on ordinary dashboards. [The panel →](#the-panel) · [Get your own house in 3D →](#your-house-in-3d)
 
 ## Your house in 3D
 
-The **Residence** tab draws a live 3D model of your home and lights up the rooms that are occupied, using the presence, motion and mmWave sensors JARVIS already watches. There are three ways to set it up, from quickest to most exact:
+The **Residence** view draws a live 3D model of your home and lights up the rooms that are occupied, using the presence, motion and mmWave sensors JARVIS already watches. There are three ways to set it up, from quickest to most exact:
 
-1. **Pick a home style.** On the Residence tab, choose the closest match: Cape Cod, Colonial, Dutch Colonial, Ranch, Two-Story, Craftsman, Modern, Townhouse, Apartment or Cabin.
-2. **Draw your rooms.** In **Settings → Home → Floor Plan Editor**, use **+ Add Room** for each room. You can import a photo or scan of your floor plan as a background (**Import BG**) and trace over it, and add outdoor zones and your property line.
+1. **Pick a home style.** On the Residence view, choose the closest match: Cape Cod, Colonial, Dutch Colonial, Ranch, Two-Story, Craftsman, Modern, Townhouse, Apartment or Cabin.
+2. **Describe your rooms.** The visual floor-plan editor returns in Phase 3 of the fork; until then the plan is the `floor_plan_rooms` / `floor_plan_elements` JSON fields under **Settings → Home & Extras** (see [Importing a floor plan](docs/floor-plan-import.md) for the format), or use the import below.
 3. **Import from SweetHome3D.** If you already have your home drawn in [SweetHome3D](https://www.sweethome3d.com/), the converter in `scripts/` turns it into a JARVIS floor plan, keeping exact room shapes and floors. See [Importing a floor plan](docs/floor-plan-import.md).
 
 Name each room after its Home Assistant **area** so occupancy lights up the right room. The plan isn't just for show: JARVIS uses which rooms connect to each other to follow a likely route inward when it investigates a possible intrusion.
@@ -79,6 +62,24 @@ Name each room after its Home Assistant **area** so occupancy lights up the righ
 You don't need the JARVIS panel to see or steer JARVIS. The integration also registers a single **JARVIS** device with ordinary Home Assistant entities: status sensors (`sensor.jarvis_observer`, LLM providers, broadcast, notifications, satellites), `binary_sensor.jarvis_asleep` and one `binary_sensor.jarvis_<area>_occupied` per room, `select.jarvis_mode`, `alarm_control_panel.jarvis_lockdown` (arm = lockdown, disarm = lift it), `event.jarvis_activity` for the Logbook, and a switch, select or number for every behaviour setting the panel exposes. They go on any dashboard, into automations and through Assist, and writing to them uses the same path as the panel so the two never disagree.
 
 `examples/jarvis-dashboard.yaml` is a ready-made **sections** dashboard built from stock cards only (it follows your light or dark theme) — paste it into a new dashboard's raw configuration editor and adjust the room area ids. The sidebar panel is now **admin-only**; household members use the entities instead. Chat is Home Assistant's own Assist dialog with the JARVIS agent. Entity-by-entity details, the security changes behind this and the import steps: [Native entities and a stock dashboard](docs/native-entities.md).
+
+## The panel
+
+The **JARVIS** sidebar entry (`/jarvis`) is an **admin-only** panel; household members use the entities and the stock dashboard above. Since the fork's Phase 2 it is an ordinary Home Assistant page rather than a themed HUD: it has no colours of its own and follows your HA theme (light, dark or a custom theme), works on a phone (the tabs become a bottom nav), is keyboard and screen-reader usable, and is built with Lit from `frontend/` into the single bundle Home Assistant serves. Seven views:
+
+| View | What it shows |
+| --- | --- |
+| **Overview** | Status tiles (observer, sleep, LLM providers, broadcast, notify, satellites, lockdown), the operational mode, a lockdown switch, the most active room, quick actions (nap, unshush) and every area with its sensors, occupancy and lights. |
+| **Intrusion** | Current state with the last camera still, *call off (false alarm)* and *I'm looking*, response settings, and the event log you label real / false alarm so JARVIS learns. |
+| **Suggestions** | Automations JARVIS proposes from your routines, with the evidence behind each; approve or dismiss; goals; learning status and *Analyze now*. |
+| **Memory** | What JARVIS knows (teach and forget facts), per-person routines, recent briefings. |
+| **Residence** | The live 3D model (home style, floors, drag or arrow keys to rotate), the dominant room and the mmWave presence breakdown. |
+| **Logs** | System log with category filters and search, activity feed, diagnostics, cognitive-core counters and the governance switches. |
+| **Settings** | Every panel-writable setting, generated from the backend catalogue (`jarvis/config_schema`): grouped (General, Voice & Audio, Learning, Safety & Energy, Cameras, Home & Extras, Governance), searchable, deep-linkable as `/jarvis/settings/<section>/<key>`. |
+
+**Not yet ported (Phase 3):** the floor-plan editor, Camera Watch tiles and camera diagnostics, doorbell training, faces and voices, the document library and semantic search, live provider/model pickers, the energy and hazard tools, the mute list and the *brief me now* button (the `jarvis.briefing` service and the example dashboard's button still work). The Settings view lists what is missing under each section. Chat moved to Assist.
+
+Build, type-check, lint, smoke test and the standalone harness: [frontend/README.md](frontend/README.md). What each view does, the mock harness and the no-literal-colour rule: [docs/panel.md](docs/panel.md).
 
 ## FAQ
 
@@ -90,7 +91,7 @@ Those answer when you speak to them. JARVIS does that too, since it plugs into t
 - The Cognitive Core classifies every home event by urgency and speaks up only when something matters.
 - It remembers facts and per-person routines, and proposes automations from patterns it sees.
 - It analyzes doorbell and porch cameras.
-- It ships its own HUD dashboard.
+- It ships its own admin panel, and native entities for your own dashboards.
 - It keeps making decisions offline through the Local Mind.
 
 **Does it work with Ollama or other local models? Can it run fully offline?**
@@ -202,13 +203,13 @@ Click the badge above, or open **HACS** in Home Assistant and search for **JARVI
 
 **4. Set up voice (optional).** On Home Assistant OS / Supervised, JARVIS bootstraps the voice stack itself on first run — it installs and starts the **Piper**, **Whisper**, and **openWakeWord** add-ons, downloads the JARVIS voice, and creates an Assist pipeline with JARVIS as the conversation agent. On Container/Core installs (no Supervisor), install those pieces yourself and create the pipeline via Settings → Voice Assistants.
 
-**5. Fine-tune (optional).** Advanced routing, observer mode, camera watching, and AI-model-per-role assignments are configured from the JARVIS panel → **Settings**. The **LLM** submenu manages provider keys. **Core** selects the Conversation provider and model. **Observer** lets you choose a provider and live model for each tier: Classifier (Tier 1 — cheap), Reasoning (Tier 2 — main), and Review (Tier 3 — periodic).
+**5. Fine-tune (optional).** Every behaviour setting lives in the JARVIS panel → **Settings**, grouped as General, Voice & Audio, Learning, Safety & Energy, Cameras, Home & Extras and Governance, with search. Provider keys stay in the integration's own configure dialog (*Settings → Devices & Services → JARVIS → Configure*) and are never sent to the panel. The per-role provider and model choices (Main Agent, Classifier — Tier 1, Reasoning — Tier 2, Review — Tier 3) are plain fields under **General** until the live model pickers return in Phase 3.
 
-> **Hard-refresh after updates.** The dashboard JavaScript is cached aggressively — after upgrading, refresh with `Ctrl+Shift+R` so the new panel loads.
+> **After updates.** The panel's script URL carries a content hash, so a normal reload picks up the new version; if the sidebar still shows the old one, a hard refresh (`Ctrl+Shift+R`) clears it.
 
 ## Advanced setup — cameras & continuous streaming
 
-*Everything in this section is optional.* You need it only for the vision features (doorbell analysis, package detection, the HUD's live camera tiles). Skip it entirely if you're starting with voice and reasoning — you can come back when you want cameras.
+*Everything in this section is optional.* You need it only for the vision features (doorbell analysis, package detection, camera confirmation of intrusions). Skip it entirely if you're starting with voice and reasoning — you can come back when you want cameras.
 
 ### How JARVIS uses cameras
 
@@ -226,7 +227,7 @@ JARVIS consumes Nest cameras and doorbells **through the official [Google Nest i
 
 1. **Google SDM API** — create a project in the [Device Access Console](https://console.nest.google.com/device-access) (US $5 one-time fee) and a Google Cloud project with the SDM API enabled and OAuth credentials.
 2. **Credentials in HA** — add your OAuth Client ID + Secret under *Settings → Devices & Services → Application Credentials*, then add the **Google Nest** integration and authorize it. Your cameras and doorbell appear as `camera.*` entities.
-3. **That's it for JARVIS** — it auto-detects Nest-platform cameras and uses the right frame source for each event (event media, stream-wake, or its own snapshot path). Battery/WebRTC-only Nest cameras can't produce ordinary still images while idle; the JARVIS panel handles this automatically by escalating to its own snapshot tier, so the tile shows frames instead of going blank.
+3. **That's it for JARVIS** — it auto-detects Nest-platform cameras and uses the right frame source for each event (event media, stream-wake, or its own snapshot path). Battery/WebRTC-only Nest cameras can't produce ordinary still images while idle; JARVIS escalates to its own snapshot tier for those (the panel's live camera tiles return in Phase 3).
 
 ### Continuous streaming for Nest cameras (recommended if you use Nest)
 
@@ -261,7 +262,7 @@ go2rtc:
 }
 ```
 
-This lives in `/config/jarvis/config.json` (merge it into the existing object — don't replace the file). JARVIS validates this on load, so a typo is sidelined with a notification rather than breaking the panel. Then open **Camera Watch → DIAG** on the camera: it should report `override → camera.eliana_restream` and a healthy full-size frame instead of a blank or black tile.
+This lives in `/config/jarvis/config.json` (merge it into the existing object — don't replace the file). JARVIS validates this on load, so a typo is sidelined with a notification rather than breaking the panel. The camera diagnostics card that reports `override → camera.eliana_restream` returns to the panel in Phase 3; the override itself is applied as soon as the file is loaded.
 
 > **Note:** go2rtc's Nest source is a third-party bridge and Google occasionally changes its auth behavior. If a restream ever drops, JARVIS automatically falls back to the original Nest entity — worst case is the pre-restream behavior, never worse.
 
@@ -275,16 +276,16 @@ This lives in `/config/jarvis/config.json` (merge it into the existing object �
 | `rich_reasoning` | Cloud-first judgment for medium/high-urgency events (cheap, sharper). |
 | `visitor_learning` | Silently learn from person events at the door — never spoken. |
 | `package_detection` | Watch porch cameras for packages and mail; courier motion and mailbox sensors trigger a prompt announcement. |
-| `vision_min_interval` | **Throttle automatic camera analyses** to protect your vision provider's daily token budget (e.g. Groq's TPD cap). A minimum gap, in seconds, between *automatic* analyses (motion → silent vision, auto event reviews); `0` (default) is off. Set it in **Settings → AI Models → Vision**. Explicit requests (the `analyze_camera` service / "look at the camera" tool), doorbell presses, and person-confirmation are never throttled. |
-| Floor plan from a vacuum map | In **Residence → floor-plan editor**: **Import Map** pulls a robot-vacuum / dashboard image entity in as the floor-plan background, and **Detect Rooms** segments that map's room colours into room polygons automatically — review, rename and position them, then Save. No OpenCV dependency (Pillow + numpy, already shipped with Home Assistant). |
+| `vision_min_interval` | **Throttle automatic camera analyses** to protect your vision provider's daily token budget (e.g. Groq's TPD cap). A minimum gap, in seconds, between *automatic* analyses (motion → silent vision, auto event reviews); `0` (default) is off. Set it in the panel under **Settings → Cameras**. Explicit requests (the `analyze_camera` service / "look at the camera" tool), doorbell presses, and person-confirmation are never throttled. |
+| Floor plan from a vacuum map | The backend can pull a robot-vacuum / dashboard image entity in as the floor-plan background and segment that map's room colours into room polygons (no OpenCV dependency: Pillow + numpy, already shipped with Home Assistant). The in-panel editor that drives it (**Import Map**, **Detect Rooms**) returns in Phase 3; until then see [Importing a floor plan](docs/floor-plan-import.md). |
 | `cognition_threshold` | How salient an event must be before JARVIS escalates it. |
 | `memory_backend` / `memory_pgvector_dsn` | **Advanced, opt-in.** Long-term memory stays on local SQLite/ChromaDB by default (no setup). Set `memory_backend: pgvector` and a `memory_pgvector_dsn` to move the semantic store to your own Postgres + pgvector for a large memory. Requires the `psycopg` driver and a reachable Postgres with the `vector` extension; if either is missing it falls back to the local default, so it can't break a working install. |
 
 ## Languages
 
-JARVIS follows your Home Assistant language automatically, and you can override it in **Settings → General → Language** (or leave it on *Auto*). The setup and configuration dialogs are localized through Home Assistant's own translation system; the in-panel HUD is localized by JARVIS. Anything not yet translated falls back cleanly to English, so nothing ever breaks.
+JARVIS follows your Home Assistant language automatically, and you can override it in **Settings → General → Language** (or leave it on *Auto*). The setup and configuration dialogs are localized through Home Assistant's own translation system; the panel is localized by JARVIS. Anything not yet translated falls back cleanly to English, so nothing ever breaks — the Phase 2 panel introduced many new strings that are still English in every language (`cd frontend && npm run i18n:keys` lists them), so translations are especially welcome right now.
 
-**Fully localized (panel + setup dialog):** French, German, Spanish, Italian, Portuguese, Brazilian Portuguese, Dutch, Simplified Chinese, Traditional Chinese, Czech, Danish, Finnish, Norwegian, Polish, Romanian, Russian, Slovak, Swedish, Turkish, Ukrainian — 20 languages, each covering both the in-panel HUD and the Home Assistant setup/configuration dialogs.
+**Fully localized (panel + setup dialog):** French, German, Spanish, Italian, Portuguese, Brazilian Portuguese, Dutch, Simplified Chinese, Traditional Chinese, Czech, Danish, Finnish, Norwegian, Polish, Romanian, Russian, Slovak, Swedish, Turkish, Ukrainian — 20 languages, each covering both the panel and the Home Assistant setup/configuration dialogs.
 
 ### Help translate
 

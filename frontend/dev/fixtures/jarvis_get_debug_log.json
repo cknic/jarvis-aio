@@ -1,0 +1,388 @@
+{
+  "entries": [
+    {
+      "date": "2026-10-28",
+      "ts": "20:00:00",
+      "cat": "CONV",
+      "msg": "user: what's the temperature in the living room?"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "20:13:37",
+      "cat": "OBSERVER",
+      "msg": "living_room quiet for 25m"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "20:26:14",
+      "cat": "LOCAL",
+      "msg": "ollama qwen2.5:7b answered in 1.2s (312 tokens)"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "20:39:51",
+      "cat": "MODE",
+      "msg": "sleep mode left (motion in kitchen)"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "20:52:28",
+      "cat": "AGENT",
+      "msg": "plan: 2 steps, 1 actuating"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "20:05:05",
+      "cat": "VOICE",
+      "msg": "STT: 'turn off the hallway lights'"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "21:18:42",
+      "cat": "GATE",
+      "msg": "suppressed duplicate announcement (same text within 90s)"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "21:31:19",
+      "cat": "LEARN",
+      "msg": "pattern analysis: 3 routines, 1 new suggestion"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "21:44:56",
+      "cat": "DEDUP",
+      "msg": "skipped repeat observation for binary_sensor.front_door"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "21:57:33",
+      "cat": "SAFETY",
+      "msg": "hazard check: no freeze risk (12.4 C outside)"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "21:10:10",
+      "cat": "CLASSIFY",
+      "msg": "intent=query confidence=0.91"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "21:23:47",
+      "cat": "REPLY",
+      "msg": "spoke on media_player.kitchen: 'It is 21 degrees in the living room.'"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "22:36:24",
+      "cat": "CAMERA",
+      "msg": "snapshot front_door 1280x720 in 0.4s"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "22:49:01",
+      "cat": "CONFIG",
+      "msg": "observer_enabled -> true"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "22:02:38",
+      "cat": "ERROR",
+      "msg": "LLM request failed: connection refused (http://ollama.local:11434)"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "22:15:15",
+      "cat": "CONV",
+      "msg": "user: what's the temperature in the living room?"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "22:28:52",
+      "cat": "OBSERVER",
+      "msg": "kitchen became active (motion)"
+    },
+    {
+      "date": "2026-10-28",
+      "ts": "22:41:29",
+      "cat": "LOCAL",
+      "msg": "local engine warm; context 4096"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "06:00:00",
+      "cat": "CAMERA",
+      "msg": "snapshot front_door 1280x720 in 0.4s"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "06:13:37",
+      "cat": "CONFIG",
+      "msg": "observer_enabled -> true"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "06:26:14",
+      "cat": "ERROR",
+      "msg": "LLM request failed: connection refused (http://ollama.local:11434)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "06:39:51",
+      "cat": "CONV",
+      "msg": "user: what's the temperature in the living room?"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "07:52:28",
+      "cat": "OBSERVER",
+      "msg": "kitchen became active (motion)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "07:05:05",
+      "cat": "LOCAL",
+      "msg": "local engine warm; context 4096"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "07:18:42",
+      "cat": "MODE",
+      "msg": "sleep mode entered (bedroom dark + no motion 30m)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "07:31:19",
+      "cat": "AGENT",
+      "msg": "plan: 2 steps, 1 actuating"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "08:44:56",
+      "cat": "VOICE",
+      "msg": "satellite 'kitchen' wake word"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "08:57:33",
+      "cat": "GATE",
+      "msg": "quiet hours active; announcement deferred"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "08:10:10",
+      "cat": "LEARN",
+      "msg": "recorded outcome good for decision #412"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "08:23:47",
+      "cat": "DEDUP",
+      "msg": "skipped repeat observation for binary_sensor.front_door"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "09:36:24",
+      "cat": "SAFETY",
+      "msg": "hazard check: no freeze risk (12.4 C outside)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "09:49:01",
+      "cat": "CLASSIFY",
+      "msg": "intent=command confidence=0.78"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "09:02:38",
+      "cat": "REPLY",
+      "msg": "spoke on media_player.kitchen: 'It is 21 degrees in the living room.'"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "09:15:15",
+      "cat": "CAMERA",
+      "msg": "vision: person at front door (0.83)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "10:28:52",
+      "cat": "CONFIG",
+      "msg": "ui_language -> auto"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "10:41:29",
+      "cat": "ERROR",
+      "msg": "TTS failed for media_player.kitchen: timeout after 10s"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "10:54:06",
+      "cat": "CONV",
+      "msg": "user: what's the temperature in the living room?"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "10:07:43",
+      "cat": "OBSERVER",
+      "msg": "living_room quiet for 25m"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "11:20:20",
+      "cat": "LOCAL",
+      "msg": "ollama qwen2.5:7b answered in 1.2s (312 tokens)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "11:33:57",
+      "cat": "MODE",
+      "msg": "sleep mode left (motion in kitchen)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "11:46:34",
+      "cat": "AGENT",
+      "msg": "plan: 2 steps, 1 actuating"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "11:59:11",
+      "cat": "VOICE",
+      "msg": "STT: 'turn off the hallway lights'"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "12:12:48",
+      "cat": "GATE",
+      "msg": "suppressed duplicate announcement (same text within 90s)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "12:25:25",
+      "cat": "LEARN",
+      "msg": "pattern analysis: 3 routines, 1 new suggestion"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "12:38:02",
+      "cat": "DEDUP",
+      "msg": "skipped repeat observation for binary_sensor.front_door"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "12:51:39",
+      "cat": "SAFETY",
+      "msg": "hazard check: no freeze risk (12.4 C outside)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "13:04:16",
+      "cat": "CLASSIFY",
+      "msg": "intent=query confidence=0.91"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "13:17:53",
+      "cat": "REPLY",
+      "msg": "spoke on media_player.kitchen: 'It is 21 degrees in the living room.'"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "13:30:30",
+      "cat": "CAMERA",
+      "msg": "snapshot front_door 1280x720 in 0.4s"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "13:43:07",
+      "cat": "CONFIG",
+      "msg": "observer_enabled -> true"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "14:56:44",
+      "cat": "ERROR",
+      "msg": "LLM request failed: connection refused (http://ollama.local:11434)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "14:09:21",
+      "cat": "CONV",
+      "msg": "user: what's the temperature in the living room?"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "14:22:58",
+      "cat": "OBSERVER",
+      "msg": "kitchen became active (motion)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "14:35:35",
+      "cat": "LOCAL",
+      "msg": "local engine warm; context 4096"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "15:48:12",
+      "cat": "MODE",
+      "msg": "sleep mode entered (bedroom dark + no motion 30m)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "15:01:49",
+      "cat": "AGENT",
+      "msg": "plan: 2 steps, 1 actuating"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "15:14:26",
+      "cat": "VOICE",
+      "msg": "satellite 'kitchen' wake word"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "15:27:03",
+      "cat": "GATE",
+      "msg": "quiet hours active; announcement deferred"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "16:40:40",
+      "cat": "LEARN",
+      "msg": "recorded outcome good for decision #412"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "16:53:17",
+      "cat": "DEDUP",
+      "msg": "skipped repeat observation for binary_sensor.front_door"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "16:06:54",
+      "cat": "SAFETY",
+      "msg": "hazard check: no freeze risk (12.4 C outside)"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "16:19:31",
+      "cat": "CLASSIFY",
+      "msg": "intent=command confidence=0.78"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "17:32:08",
+      "cat": "REPLY",
+      "msg": "spoke on media_player.kitchen: 'It is 21 degrees in the living room.'"
+    },
+    {
+      "date": "2026-10-29",
+      "ts": "17:45:45",
+      "cat": "CAMERA",
+      "msg": "vision: person at front door (0.83)"
+    }
+  ]
+}

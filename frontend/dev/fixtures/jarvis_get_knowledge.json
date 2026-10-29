@@ -1,0 +1,16 @@
+{
+  "facts": [
+    { "id": 7, "kind": "fact", "subject": "household", "key": "trash day", "value": "Tuesday", "source": "stated", "confidence": 1.0, "salience": 1.0, "created_at": 1761631200.0, "updated_at": 1761717600.0, "last_referenced": null, "expires_at": null },
+    { "id": 6, "kind": "fact", "subject": "household", "key": "wifi guest network", "value": "JarvisGuest, password on the fridge", "source": "stated", "confidence": 1.0, "salience": 0.8, "created_at": 1761544800.0, "updated_at": 1761544800.0, "last_referenced": 1761630000.0, "expires_at": null },
+    { "id": 5, "kind": "event", "subject": "household", "key": "plumber visit", "value": "Thursday 14:00", "source": "stated", "confidence": 1.0, "salience": 0.9, "created_at": 1761458400.0, "updated_at": 1761458400.0, "last_referenced": null, "expires_at": 1762171200.0 },
+    { "id": 4, "kind": "fact", "subject": "household", "key": "thermostat preference at night", "value": "19 °C", "source": "observed", "confidence": 0.72, "salience": 0.6, "created_at": 1761372000.0, "updated_at": 1761372000.0, "last_referenced": null, "expires_at": null },
+    { "id": 3, "kind": "preference", "subject": "primary", "key": "coffee", "value": "flat white, oat milk", "source": "stated", "confidence": 1.0, "salience": 0.7, "created_at": 1761285600.0, "updated_at": 1761285600.0, "last_referenced": 1761630000.0, "expires_at": null },
+    { "id": 2, "kind": "preference", "subject": "primary", "key": "wake-up music", "value": "something quiet, no vocals", "source": "inferred", "confidence": 0.55, "salience": 0.5, "created_at": 1761199200.0, "updated_at": 1761199200.0, "last_referenced": null, "expires_at": null },
+    { "id": 1, "kind": "profile", "subject": "sam_smith", "key": "works from home", "value": "Mondays and Fridays", "source": "stated", "confidence": 1.0, "salience": 0.6, "created_at": 1761112800.0, "updated_at": 1761112800.0, "last_referenced": null, "expires_at": null }
+  ],
+  "stats": {
+    "total": 7,
+    "by_kind": { "fact": 3, "preference": 2, "event": 1, "profile": 1 },
+    "by_subject": { "household": 4, "primary": 2, "sam_smith": 1 }
+  }
+}

@@ -1,4 +1,5 @@
-"""Frontend <-> WebSocket command contract — v7.45.0.
+"""Frontend <-> WebSocket command contract — v7.45.0, re-pointed at the Lit
+panel sources in fork Phase 2.
 
 The panel talks to the backend over a set of `jarvis/*` WebSocket commands. A
 backend refactor that renames or drops a command, or forgets to register a
@@ -7,9 +8,14 @@ static analysis (no Home Assistant / voluptuous needed):
 
   * every command the panel SENDS is registered and reachable in the backend,
   * every WS handler that declares a command type is actually registered,
+  * the committed bundle carries every command the sources send (a stale
+    build would otherwise pass here and fail in the browser),
   * the extraction itself found commands on both sides (guards vacuous passes).
 
-They read the real source files, so they fail the moment the two sides drift.
+The panel is TypeScript under frontend/src (built into
+custom_components/jarvis/frontend/jarvis-panel.js); `ws(hass, "jarvis/…")`
+spreads the type into the message, so every "jarvis/…" string literal in the
+sources is a command the panel can send.
 """
 from __future__ import annotations
 
@@ -17,9 +23,13 @@ import ast
 import pathlib
 import re
 
-_COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "jarvis"
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_COMP = _ROOT / "custom_components" / "jarvis"
 _WS_PY = _COMP / "websocket.py"
 _PANEL_JS = _COMP / "frontend" / "jarvis-panel.js"
+_FRONTEND_SRC = _ROOT / "frontend" / "src"
+
+_COMMAND_RE = re.compile(r"""["'](jarvis/[a-z_]+)["']""")
 
 
 def _type_from_decorator(dec: ast.AST):
@@ -42,7 +52,7 @@ def _type_from_decorator(dec: ast.AST):
 
 
 def _backend():
-    """Return (func_to_type, registered_types)."""
+    """Return (func_to_type, registered_funcs, registered_types)."""
     src = _WS_PY.read_text()
     tree = ast.parse(src)
     func_to_type: dict[str, str] = {}
@@ -58,10 +68,15 @@ def _backend():
     return func_to_type, registered_funcs, registered_types
 
 
+def _frontend_sources() -> str:
+    files = sorted(_FRONTEND_SRC.rglob("*.ts"))
+    assert files, f"no panel sources under {_FRONTEND_SRC}"
+    return "\n".join(p.read_text(encoding="utf-8") for p in files)
+
+
 def _frontend() -> set:
-    """The jarvis/* command types the panel actually SENDS (type: "jarvis/…")."""
-    src = _PANEL_JS.read_text()
-    return set(re.findall(r"""type:\s*["'](jarvis/[a-z_]+)["']""", src))
+    """The jarvis/* command types the panel sources can SEND."""
+    return set(_COMMAND_RE.findall(_frontend_sources()))
 
 
 def test_every_panel_command_is_registered():
@@ -78,6 +93,17 @@ def test_no_declared_handler_left_unregistered():
     assert not orphans, (
         "WS handlers declare a command type but are never async_register_command'd: "
         f"{sorted(orphans)}")
+
+
+def test_built_bundle_carries_every_source_command():
+    # The committed bundle is what HACS ships. Every command the sources send
+    # must survive into it — a bundle built from older sources would not have
+    # the newest commands.
+    bundle = set(_COMMAND_RE.findall(_PANEL_JS.read_text(encoding="utf-8")))
+    missing = _frontend() - bundle
+    assert not missing, (
+        "custom_components/jarvis/frontend/jarvis-panel.js is stale: rebuild "
+        f"with `cd frontend && npm run build` (missing {sorted(missing)})")
 
 
 def test_extraction_found_commands_on_both_sides():

@@ -1,0 +1,54 @@
+{
+  "rooms": [
+    {
+      "area_id": "living_room",
+      "name": "Living Room",
+      "outdoor": false,
+      "sensor_count": 2,
+      "detecting_count": 1,
+      "state": "detecting",
+      "freshest": "2m",
+      "sensors": [
+        { "entity_id": "binary_sensor.living_room_mmwave", "name": "Living Room mmWave", "detecting": true, "age": "2m" },
+        { "entity_id": "binary_sensor.living_room_motion", "name": "Living Room Motion", "detecting": false, "age": "9m" }
+      ]
+    },
+    {
+      "area_id": "kitchen",
+      "name": "Kitchen",
+      "outdoor": false,
+      "sensor_count": 1,
+      "detecting_count": 0,
+      "state": "clear",
+      "freshest": "38m",
+      "sensors": [
+        { "entity_id": "binary_sensor.kitchen_presence", "name": "Kitchen Presence", "detecting": false, "age": "38m" }
+      ]
+    },
+    {
+      "area_id": "master_bedroom",
+      "name": "Master Bedroom",
+      "outdoor": false,
+      "sensor_count": 1,
+      "detecting_count": 0,
+      "state": "clear",
+      "freshest": "7h",
+      "sensors": [
+        { "entity_id": "binary_sensor.master_bedroom_occupancy", "name": "Master Bedroom Occupancy", "detecting": false, "age": "7h" }
+      ]
+    },
+    {
+      "area_id": "driveway",
+      "name": "Driveway",
+      "outdoor": true,
+      "sensor_count": 1,
+      "detecting_count": 0,
+      "state": "clear",
+      "freshest": "3h",
+      "sensors": [
+        { "entity_id": "binary_sensor.driveway_motion", "name": "Driveway Motion", "detecting": false, "age": "3h" }
+      ]
+    }
+  ],
+  "summary": { "rooms_with_mmwave": 4, "rooms_detecting": 1, "total_sensors": 5 }
+}

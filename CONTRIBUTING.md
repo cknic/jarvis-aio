@@ -13,14 +13,24 @@ jarvis-aio/                         repo root (HACS integration repository)
 ├── .github/                         funding, issue templates, CI
 ├── scripts/bump_version.sh          one-command version bump
 │   └── legacy_addon_bootstrap.py    reference for the in-progress in-integration bootstrap
+├── frontend/                        the panel's SOURCE (TypeScript + Lit, esbuild)
+│   ├── src/  dev/  scripts/  specs/ DESIGN.md  README.md
+│   └── package.json                 npm run all = check + lint:theme + build + smoke
+├── docs/panel.md                    what the panel does and how it is tested
 └── custom_components/jarvis/        the integration (domain: jarvis)
     ├── manifest.json
     ├── __init__.py + 47 modules
-    └── frontend/jarvis-panel.js     the dashboard
+    └── frontend/jarvis-panel.js     the panel BUNDLE (generated from frontend/,
+                                     committed; never edit by hand) + i18n/
 ```
 
 HACS installs `custom_components/jarvis/` into Home Assistant. The integration
 runs in-process; the config flow (or a migrated legacy config) sets it up.
+
+The panel is built, not written, into `custom_components/jarvis/frontend/jarvis-panel.js`:
+edit `frontend/src/`, run `cd frontend && npm run build` and commit the rebuilt
+bundle together with the source change. CI rebuilds it and fails on a diff.
+See [frontend/README.md](frontend/README.md) and [docs/panel.md](docs/panel.md).
 
 ## Code standard
 
@@ -45,7 +55,10 @@ python3 scripts/audit.py
 # Unit tests
 python3 -m pytest tests/ -q
 
-# Dashboard JavaScript parses
+# Panel: type check, theme lint, rebuild the bundle, jsdom smoke test (Node >= 22)
+cd frontend && npm ci && npm run all && cd ..
+# The rebuilt custom_components/jarvis/frontend/jarvis-panel.js must be committed
+# with the source change — CI runs `git diff --exit-code` on it after its own build.
 node --check custom_components/jarvis/frontend/jarvis-panel.js
 
 # Kernel adoption + behavioral coverage gates (no drift, no undeclared actuators)
@@ -92,13 +105,16 @@ Bump the version everywhere it appears with one command:
 ./scripts/bump_version.sh 6.3.3
 ```
 
-This updates the integration `manifest.json` (the source of truth) and the version
-string in `jarvis-panel.js`. Then commit, tag (`git tag 6.3.3` — tags are `X.Y.Z`,
-no `v` prefix), and push the tag — the validation workflow runs on every push, and
-HACS publishes from the tag (no add-on/Docker build).
+This updates the integration `manifest.json` (the source of truth). The panel
+shows the version it receives in the `jarvis/get_panel_data` snapshot, which is
+read from the manifest, so nothing in `jarvis-panel.js` changes — and the bundle
+is never edited by hand anyway (see above). Then commit, tag (`git tag 6.3.3` —
+tags are `X.Y.Z`, no `v` prefix), and push the tag — the validation workflow runs
+on every push, and HACS publishes from the tag (no add-on/Docker build).
 
-After updating on a live system, hard-refresh the browser (`Ctrl+Shift+R`) so the
-cached dashboard JavaScript reloads.
+After updating on a live system a normal reload picks up the new panel: its
+script URL carries a content hash. If the sidebar still shows the old one, a hard
+refresh (`Ctrl+Shift+R`) clears it.
 
 ## Pull requests
 
