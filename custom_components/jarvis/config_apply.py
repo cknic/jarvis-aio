@@ -323,6 +323,7 @@ _FIELDS: tuple[FieldSpec, ...] = (
     _i("movie_dim_pct", 15, "Movie dim level (%)", "home", 0, 100),
     # ── governance: autonomy, modes, energy, sub-agents ────────────────────
     _b("autonomy_enforce", False, "Graduated autonomy (enforce)", "governance"),
+    _b("goals_kernel_authoritative", True, "Kernel plan authoritative for goals", "governance"),  # upstream 9.40.0 (H4b)
     _b("friday_automator", False, "FRIDAY automator", "governance"),
     _b("operational_mode_auto", True, "Automatic operational mode", "governance", expose=True),
     _j("custom_modes", {}, "Custom modes", "governance"),
