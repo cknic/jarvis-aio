@@ -134,6 +134,9 @@ only signed `/api/` images), exercises the shell (tab order, scrolling tab
 row, the narrow bottom nav and its More sheet, back button, keyboard,
 `jarvis-navigate` / `jarvis-refresh`, a German dictionary, a WebSocket
 failure), walks every Settings section for its tool cards and field editors,
+saves one edit through the voice-confirm list and the biometrics map (exactly
+that key is written, with the expected value), fails when the bundle defines
+a `jarvis-editor-*` / `jarvis-tool-*` element the run never asserts, walks
 every floor-plan editor tab in light and dark, and runs an editor round trip
 through `EditorStore` (add a room, undo, redo, save exactly
 `floor_plan_rooms`, reload the saved snapshot without a conflict), and checks

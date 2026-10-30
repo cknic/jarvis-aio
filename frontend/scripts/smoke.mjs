@@ -16,7 +16,11 @@
 //   - tab navigation pushes /jarvis/<view> and the back button restores it,
 //   - a sub-route (/residence/editor) mounts the owning view with subPath,
 //   - every Settings category shows its registered tool cards and field
-//     editors (settings/tools), with no error state,
+//     editors (settings/tools), with no error state; the voice-confirm list
+//     and the biometrics map render the fixture values and save one edit as
+//     exactly their key through jarvis/update_config,
+//   - every jarvis-editor-* / jarvis-tool-* element the bundle defines is
+//     asserted somewhere in this run (a new editor must be added here),
 //   - every floor-plan editor sub-tab (/residence/editor/<tab>) mounts its
 //     element and the canvas draws the rooms, in light and dark,
 //   - keyboard focus survives a row's Remove (src/focus.ts) in the editor's
@@ -175,6 +179,16 @@ function applyTheme(name) {
 }
 
 // ── load the bundle ────────────────────────────────────────────────────────
+// Record every tag the bundle defines, for the completeness check at the end.
+const definedTags = new Set();
+{
+  const registry = window.customElements;
+  const define = registry.define.bind(registry);
+  registry.define = (name, ...rest) => {
+    definedTags.add(name);
+    return define(name, ...rest);
+  };
+}
 let code = fs.readFileSync(BUNDLE, "utf8");
 check("bundle has no import statements (self-contained ES module)", !/^\s*import\s/m.test(code) && !/\bimport\s*\(\s*["']/.test(code));
 // A trailing `export{...}` (if the entry exports anything) is the only module
@@ -446,9 +460,12 @@ const SETTINGS_TOOL_CARDS = {
   safety: ["energy", "hazard", "mutes"], cameras: [], home: ["wellbeing"], governance: ["governance"],
 };
 const SETTINGS_FIELD_EDITORS = {
-  core: ["jarvis-editor-model-role"], voice: ["jarvis-editor-pairings", "jarvis-editor-toggle-list", "jv-picker"],
+  core: ["jarvis-editor-model-role", "jarvis-editor-biometrics-map", "jv-picker"],
+  voice: ["jarvis-editor-pairings", "jarvis-editor-toggle-list", "jarvis-editor-voice-confirm", "jv-picker"],
   learning: ["jv-picker"], safety: ["jarvis-editor-toggle-list", "jarvis-editor-appliances"], cameras: ["jv-picker"], home: ["jv-picker"],
 };
+/** tool card elements seen under the asserted ids (completeness check) */
+const toolCardTags = new Set();
 for (const theme of ["light", "dark"]) {
   applyTheme(theme);
   for (const [cat, ids] of Object.entries(SETTINGS_TOOL_CARDS)) {
@@ -458,6 +475,7 @@ for (const theme of ["light", "dark"]) {
     const cards = [...(view?.shadowRoot?.querySelectorAll("[data-tool-id]") ?? [])];
     const got = cards.map((c) => c.dataset.toolId);
     check(`[${theme}] /settings/${cat} tool cards: ${ids.join(",") || "(none)"}`, got.join(",") === ids.join(","), got.join(","));
+    if (got.join(",") === ids.join(",")) for (const c of cards) toolCardTags.add(c.tagName.toLowerCase());
     const empty = cards.filter((c) => !c.shadowRoot || deepText(c).trim().length === 0).map((c) => c.dataset.toolId);
     check(`[${theme}] /settings/${cat} every tool card rendered content`, empty.length === 0, empty.join(","));
     for (const tag of SETTINGS_FIELD_EDITORS[cat] ?? []) {
@@ -467,6 +485,52 @@ for (const theme of ["light", "dark"]) {
     check(`[${theme}] /settings/${cat} shows no error state`, errs.length === 0, errs.slice(0, 3).join(" | "));
     themeChecks(`[${theme}] /settings/${cat}`);
   }
+}
+// ── settings: two field editors save one edit through jarvis/update_config ─
+{
+  const writes = [];
+  const backend = makeHass("en");
+  const fixtureCall = backend.callWS;
+  backend.callWS = async (msg) => {
+    if (msg.type === "jarvis/update_config") {
+      writes.push({ key: msg.key, value: JSON.parse(JSON.stringify(msg.value)) });
+      return { key: msg.key, value: msg.value };
+    }
+    return fixtureCall(msg);
+  };
+  panel.hass = backend;
+  const settingsEditor = async (cat, tag) => {
+    panel.route = { prefix: PREFIX, path: `/settings/${cat}` };
+    await settle(20);
+    return deepAll(sr.querySelector("jarvis-view-settings"), tag)[0] ?? null;
+  };
+
+  // voice_confirm_entities = ["light.living_room", "!camera.front_door"]: Require / Exempt per row
+  const vc = await settingsEditor("voice", "jarvis-editor-voice-confirm");
+  const vcRows = [...(vc?.shadowRoot?.querySelectorAll(".rows > li") ?? [])];
+  const pressed = (li) => [...li.querySelectorAll(".seg button")].map((b) => b.getAttribute("aria-pressed")).join(",");
+  check("voice-confirm: one row per stored entry, in order", vcRows.map((li) => li.title).join(",") === "light.living_room,!camera.front_door", vcRows.map((li) => li.title).join(","));
+  check("voice-confirm: Require pressed for the bare id, Exempt for the '!' entry", vcRows.length === 2 && pressed(vcRows[0]) === "true,false" && pressed(vcRows[1]) === "false,true", vcRows.map(pressed).join(" | "));
+  vcRows[0]?.querySelectorAll(".seg button")[1]?.click();
+  await settle(20);
+  check("voice-confirm: Exempt on the first row saves exactly voice_confirm_entities with '!light.living_room'",
+    writes.length === 1 && writes[0].key === "voice_confirm_entities" && canon(writes[0].value) === canon(["!light.living_room", "!camera.front_door"]), JSON.stringify(writes));
+
+  // biometric_entities = {heart_rate: "sensor.watch_heart_rate"}: nine kind -> entity pickers
+  writes.length = 0;
+  const bm = await settingsEditor("core", "jarvis-editor-biometrics-map");
+  const bmRows = [...(bm?.shadowRoot?.querySelectorAll(".rows > li") ?? [])];
+  const bmRow = (kind) => bmRows.find((li) => li.querySelector(".sec.jv-mono")?.textContent === kind);
+  check("biometrics map: nine kind rows, no unknown kind", bmRows.length === 9 && !bmRows.some((li) => li.classList.contains("unknown")), `rows=${bmRows.length}`);
+  check("biometrics map: heart_rate picker shows the stored entity", bmRow("heart_rate")?.querySelector("jv-picker")?.value === "sensor.watch_heart_rate" && bmRow("steps")?.querySelector("jv-picker")?.value === "");
+  bmRow("steps")?.querySelector("jv-picker")?.dispatchEvent(new window.CustomEvent("value-changed", { detail: { value: "sensor.watch_steps" }, bubbles: true, composed: true }));
+  await settle(20);
+  check("biometrics map: picking steps saves exactly biometric_entities with both kinds",
+    writes.length === 1 && writes[0].key === "biometric_entities" && canon(writes[0].value) === canon({ heart_rate: "sensor.watch_heart_rate", steps: "sensor.watch_steps" }), JSON.stringify(writes));
+  const errs = errorStates(sr.querySelector("jarvis-view-settings"));
+  check("settings editors: no error state after the saves", errs.length === 0, errs.slice(0, 3).join(" | "));
+  panel.hass = makeHass("en");
+  await settle(20);
 }
 panel.route = { prefix: PREFIX, path: "/settings/core/tool:briefing" };
 await settle(20);
@@ -1034,6 +1098,15 @@ panel.hass = makeHass("en");
 await panel.refresh();
 await settle(10);
 check("recovery clears the alert", !sr.querySelector('[role="alert"]') && !sr.querySelector("ha-alert"));
+
+// ── completeness: every editor / tool element the bundle defines is asserted ─
+{
+  const asserted = new Set([...Object.values(SETTINGS_FIELD_EDITORS).flat(), ...Object.values(EDITOR_TABS), ...toolCardTags]);
+  const pluggable = [...definedTags].filter((tag) => /^jarvis-(editor|tool)-/.test(tag));
+  const unasserted = pluggable.filter((tag) => !asserted.has(tag));
+  check(`completeness: each of the ${pluggable.length} jarvis-editor-* / jarvis-tool-* elements the bundle defines is asserted (SETTINGS_FIELD_EDITORS, EDITOR_TABS or a tool card)`,
+    definedTags.has("jarvis-panel") && pluggable.length > 0 && unasserted.length === 0, unasserted.join(", "));
+}
 
 // ── teardown & errors ──────────────────────────────────────────────────────
 panel.remove();

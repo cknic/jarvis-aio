@@ -2470,7 +2470,9 @@
   "rich_reasoning": false,
   "home_context_max_entities": 15,
   "biometrics_enabled": false,
-  "biometric_entities": {},
+  "biometric_entities": {
+   "heart_rate": "sensor.watch_heart_rate"
+  },
   "quiet_hours_push_critical_only": false,
   "proactive_questions_interactive": true,
   "arrival_greeting_enabled": true,

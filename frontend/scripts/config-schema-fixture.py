@@ -5,9 +5,9 @@ The harness and the smoke test answer `jarvis/config_schema` from that file,
 so the Settings view in the harness shows exactly the fields the real backend
 would send. Values are the catalogue defaults (a fresh install), except the
 few keys in DEMO_VALUES below: the harness and the smoke test exercise the
-model picker, the voice-confirm entity list and the appliance editor against
-them, so they are set here (never by hand in the JSON) and survive
-regeneration.
+model picker, the voice-confirm entity list, the biometrics map and the
+appliance editor against them, so they are set here (never by hand in the
+JSON) and survive regeneration.
 
 `config_apply` imports Home Assistant, so run this with a Python that has it
 installed (the integration-test environment), from the repo root:
@@ -29,6 +29,7 @@ from custom_components.jarvis import config_apply, websocket  # noqa: E402
 DEMO_VALUES = {
     "model": "llama3-70b-8192",
     "voice_confirm_entities": ["light.living_room", "!camera.front_door"],
+    "biometric_entities": {"heart_rate": "sensor.watch_heart_rate"},
     "appliance_profile": [
         {"name": "Washer", "type": "washer", "entity": "sensor.washer_power", "watts": 500},
         {"name": "Dryer", "type": "dryer", "entity": "", "watts": 2400},

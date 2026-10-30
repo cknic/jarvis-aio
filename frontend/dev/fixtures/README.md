@@ -51,7 +51,8 @@ has its own, fixture-only router and does not echo.
 `config_schema.json` is generated, not hand-written: it is the real
 `config_apply.build_schema` catalogue (every panel-writable key, values =
 defaults, except the few demo values in the script's `DEMO_VALUES`, which the
-model picker, voice-confirm list and appliance editor are exercised against;
+model picker, voice-confirm list, biometrics map and appliance editor are
+exercised against;
 add a demo value there, never in the JSON). Regenerate it after changing the
 catalogue with
 `python frontend/scripts/config-schema-fixture.py` from the repo root, using a
