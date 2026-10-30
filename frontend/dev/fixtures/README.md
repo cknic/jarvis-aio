@@ -31,18 +31,21 @@ Who uses what (besides `panel_data.json` / `config_schema.json`):
 | Memory | `jarvis_get_knowledge`, `jarvis_add_knowledge`, `jarvis_forget_knowledge`, `jarvis_get_person_routines`, `jarvis_briefings` |
 | Documents | `jarvis_documents`, `jarvis_semantic_search`, `jarvis_search_memory` |
 | Residence | `jarvis_mmwave_overview` |
-| Floor-plan editor | `jarvis_floorplan_sources`, `jarvis_import_floorplan`, `jarvis_segment_floorplan_rooms`, `jarvis_compute_camera_coverage` (the plan itself is `panel_data.json` → `config.floor_plan_*`, `door_mapping`) |
+| Floor-plan editor | `jarvis_floorplan_sources`, `jarvis_import_floorplan`, `jarvis_segment_floorplan_rooms`, `jarvis_set_floor_background`, `jarvis_compute_camera_coverage` (the plan itself is `panel_data.json` → `config.floor_plan_*`, `door_mapping`) |
 | Logs | `jarvis_get_debug_log`, `jarvis_get_activity_log`, `jarvis_diagnostics`, `jarvis_get_calibration`, `jarvis_get_cognitive_status`, `jarvis_get_enforcement` |
 | Settings + tools (`jarvis_update_config` is every view's write) | `jarvis_update_config`, `jarvis_reload_appliances`, `jarvis_list_models`, `jarvis_energy`, `jarvis_hazard`, `jarvis_mutes`, `jarvis_voice_confirm_test`, `jarvis_get_enforcement`, `jarvis_set_enforcement` |
 | `jv-picker` | `config_area_registry_list`, `config_label_registry_list`, `config_device_registry_list` |
 
 Mutating commands (update_config, suggestion_action ...) return `{}` by
-default; the harness logs every call in its console pane. Two set-style
+default; the harness logs every call in its console pane. Three set-style
 commands are echoed by `mock-hass.ts` instead, so the harness shows what was
 asked for: `jarvis/mode {action: "set", mode}` answers `jarvis_mode.json`
 merged with `{ok: true, mode, active: mode}` (the real handler returns
-`{**set_mode_result, **mode_info()}`), and `jarvis/set_lockdown {on}` answers
-`{ok: true, lockdown: {active: on, ...}}`. The smoke test (`scripts/smoke.mjs`)
+`{**set_mode_result, **mode_info()}`), `jarvis/set_lockdown {on}` answers
+`{ok: true, lockdown: {active: on, ...}}`, and `jarvis/set_floor_background
+{floor, image?, align?}` answers `{floor, bytes, align}` for the floor it was
+sent (`jarvis_set_floor_background.json` fills in what the message left out).
+The smoke test (`scripts/smoke.mjs`)
 has its own, fixture-only router and does not echo.
 
 `config_schema.json` is generated, not hand-written: it is the real

@@ -14,8 +14,9 @@
  *   Reset                floor_plan_rooms = {} (the sample home)
  *
  * Plan changes go through store.change() (undoable, saved with Save); the
- * background, opacity, units and door mapping are immediate writes
- * (store.writeSetting). The canvas side is in ./import-layers.ts.
+ * opacity, units and door mapping are immediate writes (store.writeSetting),
+ * the background image / alignment one floor per message
+ * (store.writeFloorBackground). The canvas side is in ./import-layers.ts.
  */
 import { html, css, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
@@ -28,9 +29,9 @@ import { ws, WsError } from "../../../../ws";
 import { confirmDialog } from "../../../../components";
 import "../../../../components";
 import { JarvisEditorTab } from "../tab-base";
-import { WS_FRAME_LIMIT, updateFrameBytes } from "../store";
+import { WS_FRAME_LIMIT, floorBackgroundFrameBytes } from "../store";
 import {
-  CANONICAL_FLOORS, FT_PER_UNIT, M_PER_FT, asRecord, bboxOfPoints, dim, ensureFloor, newRoomId, parsePoints, r1, ri, roomPoints, toReal, unionBBox, unitLabel,
+  CANONICAL_FLOORS, FT_PER_UNIT, M_PER_FT, bboxOfPoints, dim, ensureFloor, newRoomId, parsePoints, r1, ri, roomPoints, toReal, unionBBox, unitLabel,
   type FloorKey, type Pt2, type Room, type Units,
 } from "../model";
 import { isAxisAlignedRect } from "./rooms-layers";
@@ -40,10 +41,10 @@ import {
   SH3D_REAL_SCALE, Sh3dError, convertSweetHome, countRooms, defaultLevelFloors, levelsWithRooms, readSweetHome,
   type Mirror, type NewRoom, type Rotation, type SweetHome,
 } from "./import-sh3d";
-import { PLAN_FILE_NAME, PlanFileError, applyPlanFile, buildBundle, downloadText, importableBackgrounds, parsePlanFile, rawBackground } from "./import-plan";
+import { PLAN_FILE_NAME, PlanFileError, applyPlanFile, buildBundle, downloadText, importableBackgrounds, parsePlanFile } from "./import-plan";
 import {
-  ALIGN_KEY, aligning, alignDraft, cancelAlignTool, clearAlignPreview, effectiveAlign, finishAlignTool, initialOffset, onAlignChange, onReviewChange,
-  parseAlign, placedPoints, resolveBackgroundHref, reviewOf, setOpacityPreview, setReview, startAlignTool, updateReview, withAlign,
+  aligning, alignDraft, cancelAlignTool, clearAlignPreview, effectiveAlign, finishAlignTool, initialOffset, onAlignChange, onReviewChange,
+  parseAlign, placedPoints, resolveBackgroundHref, reviewOf, roundAlign, setOpacityPreview, setReview, startAlignTool, updateReview,
   type BgAlign, type Candidate,
 } from "./import-layers";
 
@@ -696,7 +697,8 @@ export class JarvisEditorImport extends JarvisEditorTab {
     if (!s) return;
     this._busy = "align";
     this._bgNotice = null;
-    const ok = await s.writeSetting("floor_plan_bg", withAlign(rawBackground(s.config), floor, value));
+    // only this floor's alignment travels: the images stay on the backend
+    const ok = await s.writeFloorBackground(floor, { align: roundAlign(value) });
     clearAlignPreview(s);
     this._busy = "";
     if (ok) s.toast(value ? t("Background aligned on {floor}", { floor: this._floorName(floor) }) : t("Background fitted to the rooms again"));
@@ -734,18 +736,11 @@ export class JarvisEditorImport extends JarvisEditorTab {
     this._busy = "bg";
     this._bgNotice = null;
     try {
-      // every floor's image travels in one jarvis/update_config message (HA caps it at 4 MiB):
-      // this floor's image gets what the others leave (base64 is 4/3 of the decoded size)
-      const next = rawBackground(s.config);
-      const others = updateFrameBytes("floor_plan_bg", { ...next, [floor]: "" });
-      const budget = Math.floor(((WS_FRAME_LIMIT - others - 64) * 3) / 4);
-      if (budget < 64 * 1024) {
-        this._bgNotice = { level: "error", text: t("The other floors' background images already use {size} MB of the {max} MB one change can carry — remove one first", { size: (others / 1048576).toFixed(1), max: (WS_FRAME_LIMIT / 1048576).toFixed(1) }) };
-        return;
-      }
+      // one jarvis/set_floor_background message per floor (HA caps a message at 4 MiB): the image
+      // may use what the envelope leaves (base64 is 4/3 of the decoded size), at most BG_MAX_BYTES
+      const budget = Math.floor(((WS_FRAME_LIMIT - floorBackgroundFrameBytes(floor, { image: "" }) - 64) * 3) / 4);
       const img = await compressImage(file, budget);
-      next[floor] = img.url;
-      const ok = await s.writeSetting("floor_plan_bg", next);
+      const ok = await s.writeFloorBackground(floor, { image: img.url });
       if (ok) s.toast(t("Background image set for {floor}", { floor: this._floorName(floor) }));
       else this._bgNotice = { level: "error", text: t("Image import failed — {message}", { message: s.settingStatus.floor_plan_bg?.message || "" }) };
     } catch (err) {
@@ -767,9 +762,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
     if (aligning(s)) cancelAlignTool(s);
     this._busy = "bg";
     this._bgNotice = null;
-    const next = withAlign(rawBackground(s.config), floor, null);
-    delete next[floor];
-    const done = await s.writeSetting("floor_plan_bg", next);
+    const done = await s.writeFloorBackground(floor, { image: null, align: null });
     this._busy = "";
     if (done) s.toast(t("Background image removed from {floor}", { floor: this._floorName(floor) }));
     else this._bgNotice = { level: "error", text: t("Image import failed — {message}", { message: s.settingStatus.floor_plan_bg?.message || "" }) };
@@ -1015,13 +1008,24 @@ export class JarvisEditorImport extends JarvisEditorTab {
       if (n) {
         const ok = await confirmDialog({ heading: t("Also import {n} background images? They save immediately.", { n }), confirmLabel: t("Import") });
         if (ok) {
-          // per floor: the file's image replaces the current one; alignments merge floor by floor
-          const merged = rawBackground(s.config);
-          Object.assign(merged, pick.images);
-          const al = { ...(asRecord(merged[ALIGN_KEY]) ?? {}), ...pick.align };
-          if (Object.keys(al).length) merged[ALIGN_KEY] = al;
-          const done = await s.writeSetting("floor_plan_bg", merged);
-          if (!done) this._planNotice = { level: "error", text: t("Image import failed — {message}", { message: s.settingStatus.floor_plan_bg?.message || "" }) };
+          // one message per floor: the file's image replaces the current one, its alignment (if any)
+          // replaces that floor's; a failed floor does not stop the others, and is reported
+          const failed: FloorKey[] = [];
+          let message = "";
+          for (const [floor, image] of Object.entries(pick.images)) {
+            const align = pick.align[floor];
+            const done = await s.writeFloorBackground(floor, align ? { image, align } : { image });
+            if (!done) {
+              failed.push(floor);
+              message ||= s.settingStatus.floor_plan_bg?.message || "";
+            }
+          }
+          if (failed.length === n) this._planNotice = { level: "error", text: t("Image import failed — {message}", { message }) };
+          else if (failed.length)
+            this._planNotice = {
+              level: "error",
+              text: t("Imported {done} of {n} background images; {floors} failed — {message}", { done: n - failed.length, n, floors: failed.map((f) => this._floorName(f)).join(", "), message }),
+            };
         }
       }
     }

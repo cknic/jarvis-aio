@@ -9,7 +9,13 @@ way. This module:
   * `is_floorplan_source` / `list_sources` — find those entities, and
   * `async_import_to_floor` — fetch the entity's current image and store it as
     the `floor_plan_bg` background for a floor, exactly as the manual file upload
-    does (a `data:` URL merged into the per-floor JSON map).
+    does (a `data:` URL merged into the per-floor JSON map), and
+  * `async_set_floor_background` — the one per-floor write behind both that
+    import and the panel's `jarvis/set_floor_background` (upload, remove,
+    alignment): validate, merge ONLY that floor into the runtime-aware value,
+    persist through `config_apply.async_apply_many`. HA's websocket takes at
+    most 4 MiB per incoming frame, so the old whole-dict write capped every
+    floor's image together at that.
 
 Everything is best-effort and defensive: a fetch failure raises a clear message
 for the panel to show, and nothing else in JARVIS depends on this path.
@@ -19,7 +25,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from typing import Optional
+import math
+import re
+from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +40,17 @@ _MAP_TOKENS = (
 
 # Image bytes smaller than this are almost certainly an error/placeholder.
 _MIN_IMAGE_SIZE = 1024
+
+# floor_plan_bg = {"<floor>": "data:image/...", ..., "_align": {"<floor>": {x, y, w}}}:
+# the alignment entry rides inside the same dict (the panel's import-layers.ts).
+ALIGN_KEY = "_align"
+# A floor key: a letter or digit first (so "_align" and any later "_" entry stay
+# reserved), then word characters, space, dot or hyphen; at most 64 in all.
+_FLOOR_RE = re.compile(r"[^\W_][\w .-]{0,63}")
+# What a background may be: an inline image (the panel's isImportableImage test).
+_DATA_IMAGE_RE = re.compile(r"^data:image/[a-z0-9.+-]+[;,]", re.IGNORECASE)
+# "leave this part of the floor as it is" (None means remove it).
+_KEEP: Any = object()
 
 
 def is_floorplan_source(entity_id: str, friendly_name: Optional[str] = None) -> bool:
@@ -142,22 +161,119 @@ async def _fetch_image_bytes(hass, entity_id: str) -> tuple[bytes, str]:
     raise ValueError(f"couldn't read an image from {entity_id}")
 
 
-def _merge_background(raw, floor: str, data_url: str) -> str:
-    """Merge ``data_url`` into the ``floor_plan_bg`` JSON under ``floor`` and
-    return the new JSON string. Tolerant of a str, dict or empty prior value —
-    the same per-floor shape the manual file upload writes."""
-    bgs = {}
+def _parse_backgrounds(raw) -> dict:
+    """The stored ``floor_plan_bg`` as a fresh dict. Tolerant of a str, dict or
+    empty prior value (the vacuum import used to store JSON text)."""
     if isinstance(raw, dict):
-        bgs = dict(raw)
-    elif isinstance(raw, str) and raw.strip():
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
-                bgs = parsed
+                return parsed
         except Exception:
-            bgs = {}
-    bgs[floor] = data_url
-    return json.dumps(bgs)
+            pass
+    return {}
+
+
+def merge_floor_background(raw, floor: str, *, image=_KEEP, align=_KEEP) -> dict:
+    """A copy of ``floor_plan_bg`` with only ``floor`` changed: ``image`` (a
+    ``data:`` URL) replaces its image and ``align`` its ``_align`` entry; ``None``
+    removes either, an omitted argument keeps it. Other floors, their alignments
+    and unknown keys are carried over untouched; an empty ``_align`` is dropped."""
+    bgs = _parse_backgrounds(raw)
+    if image is not _KEEP:
+        if image:
+            bgs[floor] = image
+        else:
+            bgs.pop(floor, None)
+    if align is not _KEEP:
+        prior = bgs.get(ALIGN_KEY)
+        al = dict(prior) if isinstance(prior, dict) else {}
+        if align:
+            al[floor] = dict(align)
+        else:
+            al.pop(floor, None)
+        if al:
+            bgs[ALIGN_KEY] = al
+        else:
+            bgs.pop(ALIGN_KEY, None)
+    return bgs
+
+
+def _merge_background(raw, floor: str, data_url: str) -> str:
+    """Merge ``data_url`` into the ``floor_plan_bg`` JSON under ``floor`` and
+    return the new JSON string (:func:`merge_floor_background` as text)."""
+    return json.dumps(merge_floor_background(raw, floor, image=data_url))
+
+
+def validate_floor(floor) -> str:
+    """The floor key, or ValueError: a letter or digit first, then word
+    characters / space / dot / hyphen, 64 at most; ``_align`` is reserved."""
+    if not isinstance(floor, str) or floor == ALIGN_KEY or not _FLOOR_RE.fullmatch(floor):
+        raise ValueError(f"'{str(floor)[:40]}' is not a floor key")
+    return floor
+
+
+def validate_image(image) -> Optional[str]:
+    """A ``data:image/*`` URL, or ``None`` for null / "" (remove). Anything
+    else (an external URL, an /api/ path, another data: type) is a ValueError:
+    every admin's panel would load it."""
+    if image is None or image == "":
+        return None
+    if not isinstance(image, str) or not _DATA_IMAGE_RE.match(image):
+        raise ValueError("the image must be a data:image/... URL")
+    return image
+
+
+def validate_align(align) -> Optional[dict]:
+    """``{x, y, w}`` in plan units as floats (finite, ``w`` > 0; other keys are
+    dropped), or ``None`` to remove the floor's alignment. Else ValueError."""
+    if align is None:
+        return None
+    if not isinstance(align, dict):
+        raise ValueError("align must be {x, y, w} or null")
+    out = {}
+    for key in ("x", "y", "w"):
+        v = align.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise ValueError(f"align.{key} must be a finite number")
+        out[key] = float(v)
+    if out["w"] <= 0:
+        raise ValueError("align.w must be greater than 0")
+    return out
+
+
+async def async_set_floor_background(hass, entry, floor, *, image=_KEEP, align=_KEEP) -> dict:
+    """Set or remove ONE floor's background image and/or alignment.
+
+    Validates (:func:`validate_floor` / :func:`validate_image` /
+    :func:`validate_align`), reads the current ``floor_plan_bg`` runtime-aware
+    (runtime_config -> config.json -> entry), merges only ``floor`` and writes
+    the dict through ``config_apply.async_apply_many`` (runtime_config,
+    config.json, coordinator refresh, mirror signal). Returns ``{"floor",
+    "bytes", "align"}``: the length of the floor's stored image (0 when it has
+    none) and its alignment (or None). Raises ValueError for bad input or when
+    neither ``image`` nor ``align`` is given."""
+    floor = validate_floor(floor)
+    if image is _KEEP and align is _KEEP:
+        raise ValueError("nothing to change: pass image and/or align")
+    if image is not _KEEP:
+        image = validate_image(image)
+    if align is not _KEEP:
+        align = validate_align(align)
+    from . import config_apply
+    from .panel_data import _get_runtime_json
+    current = _get_runtime_json(hass, entry, "floor_plan_bg", {})
+    merged = merge_floor_background(current, floor, image=image, align=align)
+    await config_apply.async_apply_many(hass, entry, {"floor_plan_bg": merged})
+    stored = merged.get(floor)
+    al = merged.get(ALIGN_KEY)
+    return {
+        "floor": floor,
+        "bytes": len(stored) if isinstance(stored, str) else 0,
+        "align": al.get(floor) if isinstance(al, dict) else None,
+    }
 
 
 async def async_import_to_floor(hass, entity_id: str, floor: str = "1f") -> dict:
@@ -170,26 +286,11 @@ async def async_import_to_floor(hass, entity_id: str, floor: str = "1f") -> dict
         ctype = "image/png"
     data_url = f"data:{ctype};base64," + base64.b64encode(content).decode("ascii")
 
-    # Read the current floor_plan_bg, merge, and persist via the panel's own
-    # config store (runtime_config + config.json), so it shows up immediately and
-    # survives restarts — same key the manual upload writes.
-    from . import jarvis_config
-    try:
-        raw = jarvis_config.get("floor_plan_bg", {})
-    except Exception:
-        raw = {}
-    merged = _merge_background(raw, floor, data_url)
-    await hass.async_add_executor_job(
-        jarvis_config.set_many, {"floor_plan_bg": merged})
-    # Mirror into the live runtime_config so the open panel re-renders at once.
-    try:
-        from .const import DOMAIN
-        for data in (hass.data.get(DOMAIN) or {}).values():
-            if isinstance(data, dict):
-                rc = data.setdefault("runtime_config", {})
-                rc["floor_plan_bg"] = merged
-    except Exception:
-        pass
+    # Merge only this floor into the runtime-aware value and persist it the way
+    # the panel's own per-floor write does (runtime_config + config.json + the
+    # coordinator signal), so it shows up at once and survives restarts.
+    from .panel_data import _get_entry
+    await async_set_floor_background(hass, _get_entry(hass), floor, image=data_url)
 
     _LOGGER.info("JARVIS: imported floor plan for %s from %s (%d bytes)",
                  floor, entity_id, len(content))

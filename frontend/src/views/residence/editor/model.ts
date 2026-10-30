@@ -665,6 +665,39 @@ export function parseBackground(raw: unknown): Background {
   return out;
 }
 
+/** floor_plan_bg's alignment entry ({"<floor>": {x, y, w}}), next to the floors' images. */
+export const BG_ALIGN_KEY = "_align";
+/**
+ * One floor's part of a jarvis/set_floor_background message: `image` (a
+ * data:image/ URL) and / or `align` ({x, y, w}); null removes it, absent keeps it.
+ */
+export interface FloorBackgroundPatch {
+  image?: string | null;
+  align?: { x: number; y: number; w: number } | null;
+}
+
+/**
+ * The raw floor_plan_bg dict with only `floor` changed by `patch` - what the
+ * backend's floorplan_import.merge_floor_background stores (the store's
+ * optimistic value). Other floors, alignments and unknown keys are kept; an
+ * empty alignment entry is dropped.
+ */
+export function mergeFloorBackground(raw: unknown, floor: FloorKey, patch: FloorBackgroundPatch): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(asRecord(parseJsonish(raw)) ?? {}) };
+  if (patch.image !== undefined) {
+    if (patch.image) out[floor] = patch.image;
+    else delete out[floor];
+  }
+  if (patch.align !== undefined) {
+    const al: Record<string, unknown> = { ...(asRecord(out[BG_ALIGN_KEY]) ?? {}) };
+    if (patch.align) al[floor] = { ...patch.align };
+    else delete al[floor];
+    if (Object.keys(al).length) out[BG_ALIGN_KEY] = al;
+    else delete out[BG_ALIGN_KEY];
+  }
+  return out;
+}
+
 /** 0..1, default 0.2 when unset / not finite / out of range. */
 export function parseOpacity(raw: unknown): number {
   const v = num(raw);

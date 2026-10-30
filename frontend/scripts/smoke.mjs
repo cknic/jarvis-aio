@@ -587,6 +587,79 @@ applyTheme("light");
   }
 }
 
+// ── editor backgrounds: one floor per jarvis/set_floor_background message ──
+{
+  panel.route = { prefix: PREFIX, path: "/residence/editor/import" };
+  await settle(20);
+  const store = planEditor()?.store;
+  check("backgrounds: store available on the Import tab", !!store);
+  if (store) {
+    // a backend that merges one floor like floorplan_import.merge_floor_background
+    const stored = JSON.parse(JSON.stringify(fixture("panel_data")));
+    stored.config.floor_plan_bg = { "2f": "data:image/png;base64,TWO" };
+    const sent = [];
+    const backend = makeHass("en");
+    const fixtureCall = backend.callWS;
+    backend.callWS = async (msg) => {
+      if (msg.type === "jarvis/set_floor_background") {
+        sent.push(JSON.parse(JSON.stringify(msg)));
+        const bg = { ...stored.config.floor_plan_bg };
+        if ("image" in msg) {
+          if (msg.image) bg[msg.floor] = msg.image;
+          else delete bg[msg.floor];
+        }
+        if ("align" in msg) {
+          const al = { ...(bg._align || {}) };
+          if (msg.align) al[msg.floor] = msg.align;
+          else delete al[msg.floor];
+          if (Object.keys(al).length) bg._align = al;
+          else delete bg._align;
+        }
+        stored.config.floor_plan_bg = bg;
+        return { floor: msg.floor, bytes: typeof bg[msg.floor] === "string" ? bg[msg.floor].length : 0, align: bg._align?.[msg.floor] ?? null };
+      }
+      if (msg.type === "jarvis/update_config") sent.push(JSON.parse(JSON.stringify(msg)));
+      if (msg.type === "jarvis/get_panel_data") {
+        wsCalls.push(msg.type);
+        return JSON.parse(JSON.stringify(stored));
+      }
+      return fixtureCall(msg);
+    };
+    panel.hass = backend;
+    await settle(10);
+    store.refresh(); // load the 2f background from this backend first
+    await sleep(400);
+    await settle(10);
+    check("backgrounds: the stored 2f image is loaded", store.settings.bg["2f"] === "data:image/png;base64,TWO", JSON.stringify(store.settings.bg));
+    const img = "data:image/png;base64,ONE";
+    const ok = await store.writeFloorBackground("1f", { image: img });
+    check("backgrounds: an upload resolves ok", ok === true, JSON.stringify(store.settingStatus.floor_plan_bg));
+    check("backgrounds: an upload sends exactly that floor's image", sent.length === 1 && sent[0].type === "jarvis/set_floor_background" && sent[0].floor === "1f" && sent[0].image === img && !("align" in sent[0]), JSON.stringify(sent).slice(0, 200));
+    check("backgrounds: the editor shows the new image and the other floor stays", store.settings.bg["1f"] === img && store.settings.bg["2f"] === "data:image/png;base64,TWO", JSON.stringify(store.settings.bg));
+    await sleep(400);
+    await settle(10);
+    sent.length = 0;
+    const align = { x: 1.5, y: -2, w: 300 };
+    await store.writeFloorBackground("1f", { align });
+    check("backgrounds: an alignment sends no image at all", sent.length === 1 && canon(sent[0]) === canon({ type: "jarvis/set_floor_background", floor: "1f", align }), JSON.stringify(sent).slice(0, 200));
+    check("backgrounds: the alignment is stored under _align, images kept", canon(stored.config.floor_plan_bg) === canon({ "1f": img, "2f": "data:image/png;base64,TWO", _align: { "1f": align } }), canon(stored.config.floor_plan_bg).slice(0, 200));
+    await sleep(400);
+    await settle(10);
+    sent.length = 0;
+    const huge = "data:image/png;base64," + "A".repeat(4 * 1024 * 1024);
+    const refused = await store.writeFloorBackground("bsmt", { image: huge });
+    check("backgrounds: an image over the 4 MiB frame is refused before sending", refused === false && sent.length === 0 && store.settingStatus.floor_plan_bg?.level === "error" && /per image/.test(store.settingStatus.floor_plan_bg?.message || ""), JSON.stringify(store.settingStatus.floor_plan_bg).slice(0, 160));
+    check("backgrounds: the refused image never reaches the overlay", !store.settings.bg.bsmt);
+    await store.writeFloorBackground("1f", { image: null, align: null });
+    check("backgrounds: remove sends null image and alignment for that floor", sent.length === 1 && sent[0].image === null && sent[0].align === null && sent[0].floor === "1f");
+    check("backgrounds: remove leaves the other floors' images", canon(stored.config.floor_plan_bg) === canon({ "2f": "data:image/png;base64,TWO" }) && !store.settings.bg["1f"], canon(stored.config.floor_plan_bg));
+    check("backgrounds: floor_plan_bg is never written whole", !sent.some((m) => m.type === "jarvis/update_config"));
+    panel.hass = makeHass("en");
+    await sleep(400);
+    await settle(10);
+  }
+}
+
 // ── sub-routes: /residence/editor stays with the Residence view ────────────
 panel.route = { prefix: PREFIX, path: "/residence/editor" };
 await settle(10);

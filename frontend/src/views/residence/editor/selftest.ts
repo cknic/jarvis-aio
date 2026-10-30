@@ -14,7 +14,7 @@ import type { Hass } from "../../../types";
 import { DEFAULT_PLAN, parsePlan, planToFeet, elementsToFeet, parseElements } from "../plan";
 import {
   PLAN_KEYS, parseDoc, serializeAll, serializeRooms, docToFeet, docElementsToFeet, toReal, fromReal, dim, area, doorSlots, moveSelection,
-  removeSelection, findRoom, pinState, cloneDoc, syncFloors, CANONICAL_FLOORS, HOUSE_KEYS, OPENING_PRESETS, ROOM_TYPES, type EditorDoc,
+  removeSelection, findRoom, pinState, cloneDoc, syncFloors, mergeFloorBackground, CANONICAL_FLOORS, HOUSE_KEYS, OPENING_PRESETS, ROOM_TYPES, type EditorDoc,
 } from "./model";
 import { coverage, planGeometry, roomAt, clippedCone, markerRect, coverageContext } from "./geometry";
 import { History } from "./history";
@@ -151,6 +151,17 @@ export function selfTest(fixtureConfig?: Record<string, unknown>): string[] {
     const less = more && syncFloors(more, { home_stories: "1", has_basement: false });
     check("disabling drops the empty synthesised floors", less?.floors.map((f) => f.key).join(",") === "1f", less?.floors.map((f) => f.key).join(","));
     check("nothing to sync -> null", syncFloors(doc, { home_stories: "1", has_basement: false }) === null);
+  }
+
+  // ── floor_plan_bg: one floor changes (the backend's merge_floor_background) ──
+  {
+    const a = { x: 1, y: 2, w: 300 };
+    const raw = { "1f": "data:image/png;base64,A", "2f": "data:image/png;base64,B", _align: { "2f": a } };
+    eq("background: an image replaces only its floor", mergeFloorBackground(raw, "1f", { image: "data:image/png;base64,C" }), { ...raw, "1f": "data:image/png;base64,C" });
+    eq("background: an alignment merges floor by floor", mergeFloorBackground(raw, "1f", { align: a }), { ...raw, _align: { "1f": a, "2f": a } });
+    eq("background: null removes the image and an empty _align", mergeFloorBackground(raw, "2f", { image: null, align: null }), { "1f": "data:image/png;base64,A" });
+    eq("background: JSON text parses like a dict", mergeFloorBackground(JSON.stringify(raw), "bsmt", {}), raw);
+    check("background: the stored value is not mutated", raw._align["2f"] === a && !("1f" in raw._align));
   }
 
   // ── every table label is listed for the i18n extractor (i18n-keys.ts) ──

@@ -335,7 +335,7 @@ for selection and undo; it is never serialised.
 | `floor_plan_cameras` | on Save | `{<floor>: [{id, x, y, angle, fov, range, entity, indoor, coverage?}, …]}` |
 | `floor_plan_entities` | on Save | `{<floor>: [{e, x, y}, …]}` (the key is `e`) |
 | `floor_plan_property` | on Save | `{points: [[x, y], …]}` |
-| `floor_plan_bg` | immediately | `{<floor>: <data URL>, _align?: {<floor>: {x, y, w}}}` — the whole dict is re-sent |
+| `floor_plan_bg` | immediately | `{<floor>: <data URL>, _align?: {<floor>: {x, y, w}}}` — written one floor at a time with `jarvis/set_floor_background {floor, image?, align?}` (the backend merges that floor), so each image, not all of them together, has to fit HA's 4 MiB websocket frame |
 | `floor_plan_bg_opacity` | immediately | number 0–1 (unset = 0.2) |
 | `floor_plan_units` | immediately | `"imperial"` / `"metric"` |
 | `door_mapping` | immediately | `{<slot>: entity_id}` (blank slots omitted) |
@@ -367,8 +367,8 @@ floors.
   overlay with a checklist before they are added to, or replace, the floor's
   rooms.
 * **Background image file**: downscaled in the browser to ≤ 1600 px (PNG kept
-  when transparent, else JPEG), refused above 1.5 MB, merged into
-  `floor_plan_bg`; opacity slider; alignment (position and width, typed or
+  when transparent, else JPEG), refused above 1.5 MB, stored as that floor's
+  `floor_plan_bg` entry; opacity slider; alignment (position and width, typed or
   dragged on the plan, stored under `floor_plan_bg._align`); remove.
 * **SweetHome3D**: a `.sh3d` (ZIP, unpacked with `DecompressionStream`),
   `Home.xml` or JSON export is converted in the browser (a port of

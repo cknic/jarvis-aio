@@ -152,6 +152,17 @@ export interface ConfigSchema {
   categories: string[];
 }
 
+/**
+ * The `jarvis/set_floor_background {floor, image?, align?}` response
+ * (admin-only): ONE floor of `floor_plan_bg`, merged server-side. `bytes` is
+ * the length of the floor's stored image (0 = none), `align` its alignment.
+ */
+export interface FloorBackgroundResult {
+  floor: string;
+  bytes: number;
+  align: { x: number; y: number; w: number } | null;
+}
+
 /** Events views dispatch (bubbles + composed) and the panel handles. */
 export interface JarvisNavigateDetail {
   view: string;

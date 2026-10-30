@@ -51,6 +51,15 @@ ADMIN_ONLY_READ_COMMANDS = [
     "jarvis/area_lights",
 ]
 
+# Config writes that must be admin-only in their entirety (the panel's settings
+# and floor-plan saves; not an exhaustive list of every write command).
+ADMIN_ONLY_WRITE_COMMANDS = [
+    "jarvis/update_config",
+    "jarvis/set_enforcement",
+    "jarvis/import_floorplan",
+    "jarvis/set_floor_background",
+]
+
 # Mixed read/write commands: (command type, actions that must be guarded).
 GUARDED_BRANCHES = {
     "jarvis/faces": {"list"},
@@ -192,11 +201,20 @@ def test_static_every_listed_read_command_requires_admin():
         f"must carry @websocket_api.require_admin: {ungated}"
 
 
+def test_static_every_listed_write_command_requires_admin():
+    handlers = _handlers()
+    missing = [c for c in ADMIN_ONLY_WRITE_COMMANDS if c not in handlers]
+    assert not missing, f"commands not found in websocket.py: {missing}"
+    ungated = [c for c in ADMIN_ONLY_WRITE_COMMANDS if not _is_require_admin(handlers[c])]
+    assert not ungated, \
+        f"must carry @websocket_api.require_admin: {ungated}"
+
+
 def test_static_require_admin_sits_above_websocket_command():
     """Match the house style (ws_update_config): require_admin is the outermost
     decorator, so HA checks the admin flag before the schema/handler run."""
     handlers = _handlers()
-    for cmd in ADMIN_ONLY_READ_COMMANDS:
+    for cmd in ADMIN_ONLY_READ_COMMANDS + ADMIN_ONLY_WRITE_COMMANDS:
         names = [_decorator_name(d) for d in handlers[cmd].decorator_list]
         assert names.index("require_admin") < names.index("websocket_command"), \
             f"{cmd}: @require_admin must come before @websocket_command, got {names}"

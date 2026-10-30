@@ -155,7 +155,7 @@ exact JSON shape (types in §3):
 | `floor_plan_cameras` | json | `Record<FloorKey, CameraPin[]>` (incl. `coverage` results) | Save |
 | `floor_plan_entities` | json | `Record<FloorKey, EntityPin[]>` (`{e, x, y}` — the key is **`e`**) | Save |
 | `floor_plan_property` | json | `{points: Pt2[]}` (`{points: []}` when cleared) | Save |
-| `floor_plan_bg` | json | `Record<FloorKey, dataUrl>` — whole map re-sent (merge client-side) | immediately on upload / remove |
+| `floor_plan_bg` | json | `Record<FloorKey, dataUrl>` — written one floor at a time with `jarvis/set_floor_background` (merged server-side) | immediately on upload / remove |
 | `floor_plan_bg_opacity` | float 0..1 step 0.05 (default unset → treat as 0.2) | `number` | immediately on slider `change` |
 | `floor_plan_units` | enum `imperial`\|`metric` | `string` | immediately |
 | `door_mapping` | json | `Record<DoorSlot, entity_id>` — omit blank slots | immediately per select |
@@ -199,8 +199,9 @@ Request:
 
 Response `{floor: string, entity_id: string, bytes: number}`. The **backend** fetches the image (in-process
 `image`/`camera.async_get_image`, then the `entity_picture` proxy), builds a `data:<ctype>;base64,...` URL,
-merges it into `floor_plan_bg[floor]` and writes the key itself (as a JSON **string**, also mirrored into
-`runtime_config`). The editor must therefore `refresh()` afterwards and re-read `floor_plan_bg` from the
+merges it into `floor_plan_bg[floor]` and writes the key itself (through the same per-floor write as
+`jarvis/set_floor_background`, so a dict, mirrored into `runtime_config`; older installs may still hold a
+JSON **string**). The editor must therefore `refresh()` afterwards and re-read `floor_plan_bg` from the
 next snapshot (do not patch it locally with a guessed image). Errors: `import_failed` with messages
 `"<entity_id> is not available"` (no state) or `"couldn't read an image from <entity_id>"` (every fetch
 failed / image < 1024 bytes), or `str(exc)` for anything else.
@@ -883,9 +884,9 @@ optional `Undo` button.
 | I2 | `Import as background` | backend writes `floor_plan_bg[floor]`; then `refresh()`; the canvas shows it when the snapshot lands | `jarvis/import_floorplan {entity_id, floor}` | the floor already has a background → `Replace the background of {floor}?` | button busy; toast `Floor plan imported from {entity} ({kb} KB)`; error `Import failed — {message}` |
 | I3 | `Detect rooms` | candidates → review overlay (§5) | `jarvis/segment_floorplan_rooms {entity_id, target_span}` | no | button `Detecting…`; toast on success `Detected {n} room(s) — review, rename, position, then Save`; errors by code: `needs_numpy` → `ha-alert warning` with the backend message; others `ha-alert error` |
 | I4 | Review `Add selected` | push the checked rooms (names as edited) to the current floor | – | no | toast `Added {n} rooms` |
-| I5 | Background file chosen | read → downscale to ≤ 1600 px on the long side (canvas), PNG if the source is PNG/has transparency else JPEG q 0.85, refuse results > 1.5 MB (`Image too large after compression — use a smaller image`); merge into the bg dict; write | `jarvis/update_config {key:"floor_plan_bg", value: <whole dict>}` | existing background → `Replace the background of {floor}?` | toast `Background image set for {floor}`; error `Image import failed — {message}` |
+| I5 | Background file chosen | read → downscale to ≤ 1600 px on the long side (canvas), PNG if the source is PNG/has transparency else JPEG q 0.85, refuse results > 1.5 MB (`Image too large after compression — use a smaller image`); write that floor only | `jarvis/set_floor_background {floor, image}` (was `jarvis/update_config` with the whole dict, which capped all floors' images together at HA's 4 MiB frame) | existing background → `Replace the background of {floor}?` | toast `Background image set for {floor}`; error `Image import failed — {message}` |
 | I6 | Opacity slider `change` (`input` previews live) | write number | `jarvis/update_config {key:"floor_plan_bg_opacity", value}` | no | `%` label |
-| I7 | `Remove background` | delete the floor key, write the dict | same key | `Remove the background image of {floor}?` destructive | toast |
+| I7 | `Remove background` | remove the floor's image and alignment | `jarvis/set_floor_background {floor, image: null, align: null}` | `Remove the background image of {floor}?` destructive | toast |
 | I8 | SweetHome3D file chosen | parse (§6.1) → summary (`{n} rooms on {m} levels`, level → floor mapping selects, options) | – | no | `ha-alert error` for unreadable files with the §6.1 messages |
 | I9 | SweetHome3D `Add to plan` / `Replace plan` | convert with the chosen options; merge (append rooms per mapped floor) or replace `doc.floors` rooms entirely (openings/cameras/pins kept) | – | Replace: `Replace every room on every floor?` destructive | toast `Imported {n} rooms — review, then Save`; floor switches to the first imported floor |
 | I10 | `Export JSON` | download `jarvis-floor-plan.json` (§6.2) via Blob + `<a download>` | – | no | toast `Floor plan exported` |

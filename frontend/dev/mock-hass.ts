@@ -6,10 +6,11 @@
  *   jarvis/config_schema  -> fixtures/config_schema.json
  *   auth/sign_path        -> {path: path + "?authSig=mock"}
  *   anything else         -> fixtures/<type with "/" -> "_">.json if present, else {}
- * Two set-style commands echo the request so the harness reflects what was
+ * Three set-style commands echo the request so the harness reflects what was
  * asked for until the next (static) refetch snaps it back:
  *   jarvis/mode {action:"set", mode} -> jarvis_mode.json + {ok, active: mode, mode}
  *   jarvis/set_lockdown {on}         -> {ok: true, lockdown: {active: on, ...}}
+ *   jarvis/set_floor_background {floor, image?, align?} -> {floor, bytes, align}
  * callService is logged (and echoed to `onLog`). Nothing here talks to a real
  * Home Assistant. The dev server transpiles this file on the fly, so keep it
  * dependency-free (no imports from src/).
@@ -144,6 +145,13 @@ export function createMockHass(opts: MockHassOptions = {}): MockHass {
       if (type === "jarvis/mode" && msg.action === "set" && typeof msg.mode === "string") {
         // shaped like ws_mode's set result: {**set_mode_result, **mode_info()}
         Object.assign(out, { ok: true, mode: msg.mode, active: msg.mode, since: Date.now() / 1000, reason: String(msg.reason ?? "requested from panel") });
+      }
+      if (type === "jarvis/set_floor_background") {
+        // shaped like floorplan_import.async_set_floor_background's result (the fixture's
+        // bytes / align stand in for the stored values when the message leaves them out)
+        Object.assign(out, { floor: String(msg.floor ?? "") });
+        if ("image" in msg) out.bytes = typeof msg.image === "string" ? msg.image.length : 0;
+        if ("align" in msg) out.align = msg.align ?? null;
       }
       return out as T;
     },

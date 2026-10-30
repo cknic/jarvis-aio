@@ -128,6 +128,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_set_enforcement)
         websocket_api.async_register_command(hass, ws_floorplan_sources)
         websocket_api.async_register_command(hass, ws_import_floorplan)
+        websocket_api.async_register_command(hass, ws_set_floor_background)
         websocket_api.async_register_command(hass, ws_segment_floorplan_rooms)
     except Exception as exc:
         _LOGGER.debug("WS command register note: %s", exc)
@@ -940,7 +941,7 @@ PANEL_WRITABLE_KEYS = {
     "floor_plan_rooms",          # JSON: floor plan room positions per floor
     "floor_plan_entities",       # JSON: HA entities pinned to plan coords per floor
     "floor_plan_bg_opacity",     # 0-1: opacity of the imported floor-plan background image
-    "floor_plan_bg",             # JSON: base64 background images per floor
+    "floor_plan_bg",             # JSON: base64 background images per floor (the editor writes one floor at a time: jarvis/set_floor_background)
     # Residence model (the 3D house on the Residence tab)
     "residence_style",           # str: home style template (cape_cod, ranch, …)
     "floor_plan_sqft",           # str/int: estimated square footage
@@ -1685,6 +1686,45 @@ async def ws_import_floorplan(
     except Exception as exc:
         _LOGGER.warning("ws_import_floorplan failed: %s", exc)
         connection.send_error(msg["id"], "import_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "jarvis/set_floor_background",
+    vol.Required("floor"): str,
+    # a data:image/* URL sets the floor's image; null or "" removes it; absent keeps it
+    vol.Optional("image"): vol.Any(str, None),
+    # {x, y, w} in plan units sets the floor's alignment; null removes it; absent keeps it
+    vol.Optional("align"): vol.Any(dict, None),
+})
+@websocket_api.async_response
+async def ws_set_floor_background(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set or remove ONE floor's background image and/or alignment inside
+    ``floor_plan_bg`` (the floor-plan editor's Import tab).
+
+    HA's websocket takes at most 4 MiB per incoming frame, so writing the whole
+    dict through ``jarvis/update_config`` capped every floor's image together at
+    that, and an alignment nudge resent them all. This merges only ``floor``
+    server-side (runtime-aware read, ``config_apply.async_apply_many`` write).
+    Response ``{"floor", "bytes", "align"}``; bad input is ``invalid_format``.
+    Admin-gated (it writes the floor-plan config)."""
+    changes = {k: msg[k] for k in ("image", "align") if k in msg}
+    try:
+        from . import floorplan_import
+        res = await floorplan_import.async_set_floor_background(
+            hass, _get_entry(hass), msg["floor"], **changes)
+        _LOGGER.info("JARVIS panel: floor-plan background of %s set (%s)",
+                     res["floor"], ", ".join(sorted(changes)))
+        connection.send_result(msg["id"], res)
+    except ValueError as exc:
+        connection.send_error(msg["id"], "invalid_format", str(exc))
+    except Exception as exc:
+        _LOGGER.warning("ws_set_floor_background failed: %s", exc)
+        connection.send_error(msg["id"], "update_failed", str(exc))
 
 
 @websocket_api.require_admin

@@ -15,15 +15,16 @@
  * Alignment is stored INSIDE floor_plan_bg under the "_align" key
  * ({"1f": "data:...", "_align": {"1f": {"x": 0, "y": 0, "w": 320}}}): the model's
  * parseBackground keeps only string image values, the backend's
- * floorplan_import._merge_background keeps unknown keys, so old readers are
- * unaffected and a re-imported vacuum map keeps its calibration.
+ * floorplan_import.merge_floor_background keeps unknown keys, so old readers are
+ * unaffected and a re-imported vacuum map keeps its calibration. It is written
+ * one floor at a time (store.writeFloorBackground -> jarvis/set_floor_background).
  */
 import { svg, nothing, css } from "lit";
 import { t } from "../../../../i18n";
 import { isApiPath, signPath } from "../../../../ws";
 import type { Hass } from "../../../../types";
 import {
-  EMPTY_FLOOR_BOX, asRecord, bboxOfPoints, dim, parseJsonish, r1, ri, roomPoints, unionBBox,
+  BG_ALIGN_KEY, EMPTY_FLOOR_BOX, asRecord, bboxOfPoints, dim, parseJsonish, r1, ri, roomPoints, unionBBox,
   type BBox, type FloorKey, type Pt2,
 } from "../model";
 import { registerLayer, hitOf, pathOf, LAYER_ORDER, type CanvasDragEvent, type Layer, type LayerContext } from "../canvas";
@@ -32,7 +33,7 @@ import { ensureImageSize, imageSize } from "./import-image";
 import { hitPad } from "./rooms-layers";
 
 // ── alignment storage ───────────────────────────────────────────────────────
-export const ALIGN_KEY = "_align";
+export const ALIGN_KEY = BG_ALIGN_KEY;
 export interface BgAlign {
   /** top-left corner, plan units */
   x: number;
@@ -61,15 +62,9 @@ export function parseAlign(config: Record<string, unknown>): Record<FloorKey, Bg
   return out;
 }
 
-/** A copy of the raw floor_plan_bg dict with `floor`'s alignment set (null removes it). */
-export function withAlign(raw: Record<string, unknown>, floor: FloorKey, align: BgAlign | null): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...raw };
-  const al: Record<string, unknown> = { ...(asRecord(out[ALIGN_KEY]) ?? {}) };
-  if (align) al[floor] = { x: r1(align.x), y: r1(align.y), w: r1(align.w) };
-  else delete al[floor];
-  if (Object.keys(al).length) out[ALIGN_KEY] = al;
-  else delete out[ALIGN_KEY];
-  return out;
+/** An alignment as it is stored: 1 decimal (null stays null = remove it). */
+export function roundAlign(align: BgAlign | null): BgAlign | null {
+  return align ? { x: r1(align.x), y: r1(align.y), w: r1(align.w) } : null;
 }
 
 // ── live preview state (per editor store) ───────────────────────────────────

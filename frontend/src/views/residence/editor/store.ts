@@ -5,7 +5,8 @@
  *   history                   <- every change() that is not transient
  *   dirty                     <- serialised doc !== the baseline (per plan key)
  *   save()                    -> jarvis/update_config, one changed key at a time, then jarvis-refresh
- *   writeSetting()            -> the immediate-save keys (units, background, opacity, door mapping, house keys)
+ *   writeSetting()            -> the immediate-save keys (units, opacity, door mapping, house keys)
+ *   writeFloorBackground()    -> one floor's background image / alignment (jarvis/set_floor_background)
  *   floor / tab / selection   <- shared UI state (canvas, inspector, tabs all read it)
  *   toasts                    <- the editor renders them (role="status")
  *
@@ -14,14 +15,15 @@
  * here renders. All mutation of the doc goes through `change()`: never mutate
  * `store.doc` in place.
  */
-import type { Hass, PanelData } from "../../../types";
+import type { FloorBackgroundResult, Hass, PanelData } from "../../../types";
 import { t } from "../../../i18n";
 import { ws, WsError } from "../../../ws";
 import { History } from "./history";
 import {
-  PLAN_KEYS, cloneDoc, describeSelection, floorEnabled, floorLabel, floorOf, isCanonical, moveSelection, parseDoc, parseSettings,
+  PLAN_KEYS, cloneDoc, describeSelection, floorEnabled, floorLabel, floorOf, isCanonical, mergeFloorBackground, moveSelection, parseDoc, parseSettings,
   removeSelection, selectionExists, serializeAll, stableJson, syncFloors, areaNames as areaNamesOf,
-  type CameraPin, type EditorDoc, type EditorSettings, type EntityPin, type Floor, type FloorKey, type Opening, type PlanKey, type Room, type Selection,
+  type CameraPin, type EditorDoc, type EditorSettings, type EntityPin, type Floor, type FloorBackgroundPatch, type FloorKey, type Opening, type PlanKey, type Room,
+  type Selection,
 } from "./model";
 import type { JvPlanCanvas } from "./canvas";
 
@@ -82,19 +84,30 @@ const SAVED_STATUS_MS = 2500;
 const TOAST_MS = 4000;
 /**
  * HA's websocket accepts messages up to aiohttp's default 4 MiB; a bigger
- * jarvis/update_config frame is rejected and the connection drops. Writes
- * are refused client-side below this (the margin covers the id / envelope).
+ * frame is rejected and the connection drops. Writes are refused client-side
+ * below this (the margin covers the id / envelope). Backgrounds go one floor
+ * per message (jarvis/set_floor_background), so the limit is per image.
  */
 export const WS_FRAME_LIMIT = 4 * 1024 * 1024 - 8 * 1024;
 
-/** UTF-8 size of the jarvis/update_config message that would carry `value`. */
-export function updateFrameBytes(key: string, value: unknown): number {
-  const text = JSON.stringify({ id: 1e9, type: "jarvis/update_config", key, value });
+/** UTF-8 size of the websocket message `{id, type, ...payload}`. */
+function frameBytes(type: string, payload: Record<string, unknown>): number {
+  const text = JSON.stringify({ id: 1e9, type, ...payload });
   try {
     return new TextEncoder().encode(text).length;
   } catch {
     return text.length * 3;
   }
+}
+
+/** UTF-8 size of the jarvis/update_config message that would carry `value`. */
+export function updateFrameBytes(key: string, value: unknown): number {
+  return frameBytes("jarvis/update_config", { key, value });
+}
+
+/** UTF-8 size of the jarvis/set_floor_background message for `floor` + `patch`. */
+export function floorBackgroundFrameBytes(floor: FloorKey, patch: FloorBackgroundPatch): number {
+  return frameBytes("jarvis/set_floor_background", { floor, ...patch });
 }
 const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(2);
 
@@ -508,10 +521,11 @@ export class EditorStore {
   }
 
   /**
-   * Immediate-save path for the non-plan keys (floor_plan_units, floor_plan_bg,
+   * Immediate-save path for the non-plan keys (floor_plan_units,
    * floor_plan_bg_opacity, door_mapping and the house keys): optimistic
    * overlay, per-key status (saving -> saved, auto-cleared; error reverts),
-   * `jarvis-refresh` on success. Resolves true on success.
+   * `jarvis-refresh` on success. Resolves true on success. floor_plan_bg is
+   * NOT written whole: use writeFloorBackground().
    */
   async writeSetting(key: string, value: unknown): Promise<boolean> {
     // a frame over HA's websocket limit would drop the connection: refuse it here with a clear message
@@ -532,6 +546,41 @@ export class EditorStore {
       delete this._overlay[key];
       this._syncFloors();
       this._setStatus(key, { level: "error", message: WsError.from("jarvis/update_config", err).message });
+      return false;
+    }
+  }
+
+  /**
+   * Set / remove ONE floor's background image and / or alignment
+   * (jarvis/set_floor_background merges that floor server-side, so only this
+   * floor's image travels and each image - not all of them together - has to
+   * fit WS_FRAME_LIMIT). Same UX as writeSetting under the status key
+   * `floor_plan_bg`: the merged dict is the optimistic overlay, an error
+   * restores the previous overlay. Resolves true on success.
+   */
+  async writeFloorBackground(floor: FloorKey, patch: FloorBackgroundPatch): Promise<boolean> {
+    const key = "floor_plan_bg";
+    const bytes = floorBackgroundFrameBytes(floor, patch);
+    if (bytes > WS_FRAME_LIMIT) {
+      const message = patch.image
+        ? t("This image is {size} MB; Home Assistant accepts at most {max} MB per image", { size: mb(bytes), max: mb(WS_FRAME_LIMIT) })
+        : t("This change is {size} MB; Home Assistant accepts at most {max} MB at once", { size: mb(bytes), max: mb(WS_FRAME_LIMIT) });
+      this._setStatus(key, { level: "error", message });
+      return false;
+    }
+    const had = key in this._overlay;
+    const prev = this._overlay[key];
+    this._overlay[key] = mergeFloorBackground(this.config[key], floor, patch);
+    this._setStatus(key, { level: "saving" });
+    try {
+      await ws<FloorBackgroundResult>(this.hass, "jarvis/set_floor_background", { floor, ...patch });
+      this._setStatus(key, { level: "saved" }, SAVED_STATUS_MS);
+      this.refresh();
+      return true;
+    } catch (err) {
+      if (had) this._overlay[key] = prev;
+      else delete this._overlay[key];
+      this._setStatus(key, { level: "error", message: WsError.from("jarvis/set_floor_background", err).message });
       return false;
     }
   }

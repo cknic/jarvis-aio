@@ -68,7 +68,8 @@ bundle carries them).
 
 6. Fixtures for the commands you call: `dev/fixtures/jarvis_floorplan_sources.json`,
    `jarvis_import_floorplan.json`, `jarvis_segment_floorplan_rooms.json`,
-   `jarvis_compute_camera_coverage.json` exist already (editor.md §2.10).
+   `jarvis_set_floor_background.json`, `jarvis_compute_camera_coverage.json`
+   exist already (editor.md §2.10).
 
 A minimal tab:
 
@@ -108,7 +109,7 @@ does `requestUpdate()` from it.
 | `floors`, `currentFloor`, `rooms(floor?)`, `openings(floor?)`, `cameras(floor?)`, `pins(floor?)` | convenience views on `doc` (default: the current floor); always arrays |
 | `floor: FloorKey`, `tab: EditorTab`, `selection: Selection \| null` | shared UI state |
 | `config` | `data.config` overlaid with in-flight optimistic setting values (read house keys, `garage_bays`, ... from here) |
-| `settings: EditorSettings` | `{units, bg, bgOpacity, doorMapping}` parsed from `config` |
+| `settings: EditorSettings` | `{units, bg, bgOpacity, doorMapping}` parsed from `config` (`bg`: floor -> image; `mergeFloorBackground` in model.ts is the per-floor merge the backend does) |
 | `data: PanelData \| null` | the latest snapshot (`data.areas`, `data.doors` ...) |
 | `areaNames()` | room-name suggestions (areas with capabilities only - editor.md R9) |
 | `floorLabel(key?)`, `floorHidden(key)` | label (pass through `t()`), "Hidden on the Residence tab" |
@@ -152,23 +153,34 @@ await store.save()                 // sequential jarvis/update_config for each d
                                    // failure (that key and the rest stay dirty); -> {ok, results[], error?, code?};
                                    // dispatches jarvis-refresh when everything succeeded. The editor's
                                    // Save button / Ctrl+S / sticky bar call this - tabs normally don't.
-await store.writeSetting(key, v)   // the IMMEDIATE-save keys: floor_plan_units, floor_plan_bg (whole dict),
-                                   // floor_plan_bg_opacity (number), door_mapping (whole dict), the house
-                                   // keys of HOUSE_KEYS (see editor.md §2.2 for the exact value types).
-                                   // Optimistic overlay in `config`, status in settingStatus[key]
-                                   // (saving -> saved, auto-cleared; error -> reverted), jarvis-refresh on
-                                   // success. Resolves true/false. Not part of the history.
+await store.writeSetting(key, v)   // the IMMEDIATE-save keys: floor_plan_units, floor_plan_bg_opacity (number),
+                                   // door_mapping (whole dict), the house keys of HOUSE_KEYS (see editor.md
+                                   // §2.2 for the exact value types). Optimistic overlay in `config`, status
+                                   // in settingStatus[key] (saving -> saved, auto-cleared; error -> reverted),
+                                   // jarvis-refresh on success. Resolves true/false. Not part of the history.
+await store.writeFloorBackground(floor, {image?, align?})
+                                   // ONE floor of floor_plan_bg via jarvis/set_floor_background: image = a
+                                   // data:image/ URL (null removes it), align = {x, y, w} (null removes it),
+                                   // absent = kept. The backend merges only that floor. Same overlay / status
+                                   // (settingStatus.floor_plan_bg) / refresh / true-false contract as
+                                   // writeSetting; an error restores the previous overlay. Never write
+                                   // floor_plan_bg whole through writeSetting.
 store.discard(); store.adoptRemote(); store.dismissRemote(); store.clearSaveError(); store.refresh()
 store.toast(message, {label, run}?)   // message already translated; e.g. toast(t("Removed {name}", {name}), {label: t("Undo"), run: () => store.undo()})
                                       // the action is dropped as soon as the history moves on (the editor's button calls
                                       // store.runToastAction(id)), so an "Undo" never reverts a later change
 ```
 
-`writeSetting()` and `save()` refuse a `jarvis/update_config` message over
+`writeSetting()`, `writeFloorBackground()` and `save()` refuse a message over
 `WS_FRAME_LIMIT` (HA's websocket takes at most 4 MiB; a bigger frame drops the
-connection) with an error status instead of sending it. `floor_plan_bg` is one
-dict for every floor, so the Import tab compresses an upload to what the other
-floors leave (`updateFrameBytes`).
+connection) with an error status instead of sending it (`updateFrameBytes`,
+`floorBackgroundFrameBytes`). `floor_plan_bg` is one dict for every floor
+(`{"<floor>": "data:image/...", "_align": {"<floor>": {x, y, w}}}`) but it
+travels one floor per message, so the limit is per image, not for all of them
+together, and an alignment change sends no image at all. The Import tab
+compresses an upload to what one message leaves (at most 1.5 MB), and a plan
+file with several backgrounds writes them floor by floor, reporting the floors
+that failed.
 
 Pins are keyed by entity id and one entity may be pinned on several floors:
 the model's `selectionExists` / `moveSelection` / `removeSelection` /

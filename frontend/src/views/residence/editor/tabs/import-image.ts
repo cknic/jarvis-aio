@@ -3,8 +3,8 @@
  * downscale it to <= 1600 px on the long side, encode PNG when the source is
  * PNG or has transparency (else JPEG q 0.85) and refuse results over 1.5 MB -
  * backgrounds travel inside config.json and every panel snapshot (R2).
- * The caller may pass a smaller limit: every floor's image goes in ONE
- * jarvis/update_config message, which HA caps at 4 MiB. An opaque image that
+ * The caller may pass a smaller limit: each floor's image goes in its own
+ * jarvis/set_floor_background message, which HA caps at 4 MiB. An opaque image that
  * is over the limit is re-encoded smaller (lower JPEG quality, then fewer
  * pixels) before it is refused.
  *
