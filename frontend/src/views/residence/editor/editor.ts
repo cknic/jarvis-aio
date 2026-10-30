@@ -21,6 +21,7 @@ import { JarvisView } from "../../view-base";
 import { base } from "../../../theme/base";
 import { t } from "../../../i18n";
 import { haDefined, watchDefinitions } from "../../../ha";
+import { keepRowFocus, type RowFocus } from "../../../focus";
 import { confirmDialog } from "../../../components";
 import "../../../components";
 import { fixedBox, renderSVG, type Box } from "../house3d";
@@ -42,6 +43,8 @@ const PRESETS: ReadonlyArray<{ label: string; theta: number }> = [
 const PREVIEW_LS_KEY = "jarvis.editor.preview";
 const PREVIEW_DEBOUNCE_MS = 120;
 const HA_TAGS = ["ha-icon", "ha-alert", "ha-icon-button"];
+/** A toast's Undo / Dismiss takes the toast away: focus goes to the next / previous toast, else the current editor tab. */
+const TOAST_FOCUS: RowFocus = { row: ".toasts > .toast", key: "data-toast", control: "[data-dismiss]", fallback: ['[role="tab"][aria-selected="true"]'] };
 
 @customElement("jarvis-plan-editor")
 export class JarvisPlanEditor extends JarvisView {
@@ -727,12 +730,12 @@ export class JarvisPlanEditor extends JarvisView {
     return html`
       <div class="toasts" role="status" aria-live="polite">
         ${s.toasts.map(
-          (toast) => html`<div class="toast">
+          (toast) => html`<div class="toast" data-toast=${toast.id}>
             <span>${toast.message}</span>
             ${toast.action
-              ? html`<button type="button" class="jv-btn text" @click=${() => s.runToastAction(toast.id)}>${toast.action.label}</button>`
+              ? html`<button type="button" class="jv-btn text" @click=${(e: Event) => keepRowFocus(e, this, TOAST_FOCUS, () => s.runToastAction(toast.id))}>${toast.action.label}</button>`
               : nothing}
-            <button type="button" class="jv-icon-btn" aria-label=${t("Dismiss")} @click=${() => s.dismissToast(toast.id)}>${this._icon("mdi:close", "×")}</button>
+            <button type="button" class="jv-icon-btn" data-dismiss aria-label=${t("Dismiss")} @click=${(e: Event) => keepRowFocus(e, this, TOAST_FOCUS, () => s.dismissToast(toast.id))}>${this._icon("mdi:close", "×")}</button>
           </div>`,
         )}
       </div>

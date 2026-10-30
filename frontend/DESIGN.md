@@ -181,6 +181,11 @@ toggles; roll back and show the error if the call fails.
   (4 px padding) or uses `box-shadow: var(--jv-focus-ring-inset)`; a rule that
   sets its own `box-shadow` on a pressed state must restate the ring in its
   `:focus-visible` variant. Dialogs trap focus and close on Escape.
+* A control that takes its own row away (Remove, Delete, Dismiss) wraps the
+  removal in `keepRowFocus()` (src/focus.ts): focus moves to the same control
+  in the next row, else the previous row, else the list's Add control or a
+  `tabindex="-1"` heading - never `<body>`. Rows carry a stable key attribute
+  (an id or entity id, never the index).
 * Destructive actions (forget, delete, dismiss-all, call off, lockdown)
   confirm with `confirmDialog({destructive: true})`.
 

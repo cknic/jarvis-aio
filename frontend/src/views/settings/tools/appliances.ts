@@ -17,6 +17,7 @@ import { registerFieldEditor, type SettingsHost } from "../registry";
 import { base } from "../../../theme/base";
 import { t } from "../../../i18n";
 import { haDefined, watchDefinitions } from "../../../ha";
+import { keepRowFocus, type RowFocus } from "../../../focus";
 import type { Hass, PanelData } from "../../../types";
 import "../../../components";
 import "../../../components/jv-picker";
@@ -24,6 +25,9 @@ import type { PickerChangeDetail, PickerItem } from "../../../components/jv-pick
 import { CONTROL_TAGS, controlStyles, renderSelect, renderText, friendlyName } from "./lists-controls";
 
 export const APPLIANCE_TYPES = ["washer", "dryer", "dishwasher", "oven", "microwave", "appliance"] as const;
+
+/** A row's Remove hands keyboard focus to the next / previous row's Remove, else + Add appliance. */
+const REMOVE_FOCUS: RowFocus = { row: ".list > .row", key: "data-uid", control: "[data-remove]", fallback: [".foot > .jv-btn"] };
 
 export interface ApplianceRow {
   name: string;
@@ -319,8 +323,9 @@ export class JarvisEditorAppliances extends LitElement {
       const v = e.detail?.value;
       this._update(d.uid, { entity: Array.isArray(v) ? v[0] ?? "" : v ?? "" });
     };
+    const remove = (e: Event) => keepRowFocus(e, this, REMOVE_FOCUS, () => this._remove(d.uid));
     return html`
-      <li class="row ${invalid ? "invalid" : ""}">
+      <li class="row ${invalid ? "invalid" : ""}" data-uid=${d.uid}>
         <div class="cell">
           <span class="cap" id="${idBase}-name-cap">${t("Name")}</span>
           ${renderText({
@@ -387,8 +392,8 @@ export class JarvisEditorAppliances extends LitElement {
         </div>
         <div class="cell remove">
           ${haDefined("ha-icon-button")
-            ? html`<ha-icon-button .label=${t("Remove appliance")} ?disabled=${off} @click=${() => this._remove(d.uid)}><ha-icon icon="mdi:close"></ha-icon></ha-icon-button>`
-            : html`<button type="button" class="jv-icon-btn" aria-label=${t("Remove appliance")} ?disabled=${off} @click=${() => this._remove(d.uid)}>×</button>`}
+            ? html`<ha-icon-button data-remove .label=${t("Remove appliance")} ?disabled=${off} @click=${remove}><ha-icon icon="mdi:close"></ha-icon></ha-icon-button>`
+            : html`<button type="button" class="jv-icon-btn" data-remove aria-label=${t("Remove appliance")} ?disabled=${off} @click=${remove}>×</button>`}
         </div>
       </li>
     `;

@@ -19,6 +19,10 @@
 //     editors (settings/tools), with no error state,
 //   - every floor-plan editor sub-tab (/residence/editor/<tab>) mounts its
 //     element and the canvas draws the rooms, in light and dark,
+//   - keyboard focus survives a row's Remove (src/focus.ts) in the editor's
+//     Openings, Doors, Cameras & pins lists and toasts and in the Settings
+//     appliances, voice confirm, pairings and biometrics editors: it lands on
+//     the next row's control, else the previous row's, else the fallback,
 //   - an editor round trip: add a room through the store, undo, redo, save
 //     (exactly floor_plan_rooms is written, and it is the stored fixture plus
 //     the new room), reload the saved snapshot (clean, no conflict banner),
@@ -517,6 +521,199 @@ for (const theme of ["light", "dark"]) {
   }
 }
 applyTheme("light");
+
+// ── keyboard focus survives a row's Remove (src/focus.ts keepRowFocus) ─────
+// A keyboard user who activates a row's Remove lands on the same control in
+// the next row, else in the previous row, else on the list's fallback (its
+// Add control, a heading) - never on <body>. Each step focuses the control,
+// activates it (Enter on a button is a click), settles and reads focus down
+// through every shadow root.
+function deepActive() {
+  let a = document.activeElement;
+  while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+  return a;
+}
+/** `node` is `ancestor` or inside it, across shadow roots */
+function inside(node, ancestor) {
+  for (let n = node; n; n = n.parentNode ?? n.host ?? null) if (n === ancestor) return true;
+  return false;
+}
+/** focus `btn`, click it, settle -> the deep focus (null when the control was missing or never took focus) */
+async function activate(btn) {
+  if (!btn) return null;
+  btn.focus();
+  if (deepActive() !== btn) return null;
+  btn.click();
+  await settle(10);
+  return deepActive();
+}
+function describe(el) {
+  if (!el) return "the control was missing or never had focus";
+  const cls = typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/).join(".")}` : "";
+  return `${el.tagName.toLowerCase()}${cls} in ${el.getRootNode()?.host?.tagName?.toLowerCase() ?? "document"}`;
+}
+{
+  const tabRoot = (tag) => planEditor()?.shadowRoot?.querySelector(tag)?.shadowRoot ?? null;
+  const store = planEditor()?.store;
+  // Openings: the fixture's three on the 1st floor (e1, e2, e3)
+  panel.route = { prefix: PREFIX, path: "/residence/editor/openings" };
+  await settle(20);
+  let root = tabRoot("jarvis-editor-openings");
+  const opening = (id) => root?.querySelector(`.row[data-id="${id}"] [data-remove]`);
+  let now = await activate(opening("e1"));
+  check("focus: Openings - Remove on the first row -> the next row's Remove", !!now?.matches("[data-remove]") && now.closest(".row")?.dataset.id === "e2", describe(now));
+  now = await activate(opening("e3"));
+  check("focus: Openings - Remove on the last row -> the previous row's Remove", !!now?.matches("[data-remove]") && now.closest(".row")?.dataset.id === "e2", describe(now));
+  now = await activate(opening("e2"));
+  check("focus: Openings - Remove on the only row -> the first add button", !!now && now === root?.querySelector(".toolbar .jv-btn"), describe(now));
+
+  // the editor's toasts: Dismiss hands focus to the next / previous toast, else the current editor tab
+  for (const x of [...(store?.toasts ?? [])]) store.dismissToast(x.id);
+  for (const m of ["Toast one", "Toast two", "Toast three"]) store?.toast(m, undefined, 0);
+  await settle(10);
+  const dismiss = (text) => [...(planEditor()?.shadowRoot?.querySelectorAll(".toasts > .toast") ?? [])].find((x) => x.textContent.includes(text))?.querySelector("[data-dismiss]");
+  now = await activate(dismiss("Toast one"));
+  check("focus: editor toast - Dismiss on the first -> the next toast's Dismiss", !!now?.matches("[data-dismiss]") && /Toast two/.test(now.closest(".toast")?.textContent || ""), describe(now));
+  now = await activate(dismiss("Toast three"));
+  check("focus: editor toast - Dismiss on the last -> the previous toast's Dismiss", !!now?.matches("[data-dismiss]") && /Toast two/.test(now.closest(".toast")?.textContent || ""), describe(now));
+  now = await activate(dismiss("Toast two"));
+  check("focus: editor toast - Dismiss on the only one -> the current editor tab", now?.getAttribute("role") === "tab" && now.getAttribute("aria-selected") === "true", describe(now));
+  while (store?.dirty && store.canUndo) store.undo();
+  await settle(10);
+  check("focus: Openings - undo restores the three openings, clean", store?.openings().length === 3 && !store.dirty);
+
+  // Doors: "Other mapped slots" (the fixture's garage_1 - no garage bays - plus two) against a backend that keeps writes
+  const stored = JSON.parse(JSON.stringify(fixture("panel_data")));
+  stored.config.door_mapping = { ...stored.config.door_mapping, garage_7: "cover.garage_door", garage_8: "cover.garage_door" };
+  const keeping = makeHass("en");
+  const fixtureCall = keeping.callWS;
+  keeping.callWS = async (msg) => {
+    if (msg.type === "jarvis/update_config") {
+      stored.config[msg.key] = JSON.parse(JSON.stringify(msg.value));
+      return { key: msg.key, value: msg.value };
+    }
+    if (msg.type === "jarvis/get_panel_data") {
+      wsCalls.push(msg.type);
+      return JSON.parse(JSON.stringify(stored));
+    }
+    return fixtureCall(msg);
+  };
+  panel.hass = keeping;
+  panel.route = { prefix: PREFIX, path: "/residence/editor/doors" };
+  await panel.refresh();
+  await settle(20);
+  root = tabRoot("jarvis-editor-doors");
+  const slot = (k) => root?.querySelector(`.other > li[data-slot="${k}"] [data-remove]`);
+  check("focus: Doors - three other mapped slots listed", root?.querySelectorAll(".other > li").length === 3, String(root?.querySelectorAll(".other > li").length));
+  now = await activate(slot("garage_1"));
+  check("focus: Doors - Remove on the first other slot -> the next one's Remove", !!now?.matches("[data-remove]") && now.closest("li")?.dataset.slot === "garage_7", describe(now));
+  now = await activate(slot("garage_8"));
+  check("focus: Doors - Remove on the last other slot -> the previous one's Remove", !!now?.matches("[data-remove]") && now.closest("li")?.dataset.slot === "garage_7", describe(now));
+  now = await activate(slot("garage_7"));
+  check("focus: Doors - Remove on the only other slot -> the slot grid", !!now?.matches("fieldset.slots"), describe(now));
+  check("focus: Doors - the removals wrote door_mapping with only the front door left", canon(stored.config.door_mapping) === canon({ front: "binary_sensor.front_door" }), canon(stored.config.door_mapping));
+  panel.hass = makeHass("en");
+  await panel.refresh();
+  await settle(20);
+
+  // Cameras & pins: the fixture's camera c1 and pin binary_sensor.front_door, plus two cameras and a pin
+  panel.route = { prefix: PREFIX, path: "/residence/editor/pins" };
+  await settle(20);
+  store?.change("Add cameras and a pin", (d) => {
+    const cam = (id, x) => ({ id, x, y: 60, angle: 0, fov: 90, range: 50, entity: "", indoor: true, extra: {} });
+    d.cameras["1f"].push(cam("c8", 120), cam("c9", 160));
+    d.pins["1f"].push({ e: "light.smoke_lamp", x: 150, y: 60, extra: {} });
+  });
+  await settle(10);
+  root = tabRoot("jarvis-editor-pins");
+  const camera = (id) => root?.querySelector(`.rows > .row[data-key="camera:${id}"] [data-remove]`);
+  now = await activate(camera("c1"));
+  check("focus: Cameras - Remove on the first camera -> the next camera's Remove", !!now?.matches("[data-remove]") && now.closest(".row")?.dataset.key === "camera:c8", describe(now));
+  now = await activate(camera("c9"));
+  check("focus: Cameras - Remove on the last camera -> the previous camera's Remove", !!now?.matches("[data-remove]") && now.closest(".row")?.dataset.key === "camera:c8", describe(now));
+  store?.select({ kind: "camera", id: "c8" });
+  await settle(10);
+  now = await activate(root?.querySelector('.rows > .row[data-key="camera:c8"] .actions .jv-btn.danger'));
+  check("focus: Cameras - Delete in the only camera's form -> + Camera", !!now && now === root?.querySelector(".toolbar .jv-btn"), describe(now));
+  const pin = (e) => root?.querySelector(`.chips > .chip[data-key="pin:${e}"] [data-remove]`);
+  now = await activate(pin("binary_sensor.front_door"));
+  check("focus: Pins - Remove on the first pin -> the next pin's Remove", !!now?.matches("[data-remove]") && now.closest(".chip")?.dataset.key === "pin:light.smoke_lamp", describe(now));
+  now = await activate(pin("light.smoke_lamp"));
+  check("focus: Pins - Remove on the only pin -> the add picker", !!now && inside(now, root?.querySelector(".add-pin jv-picker")), describe(now));
+  while (store?.dirty && store.canUndo) store.undo();
+  await settle(10);
+  check("focus: Cameras & pins - undo restores the fixture's camera and pin, clean", store?.cameras().length === 1 && store.pins().length === 1 && !store.dirty);
+
+  // Rooms: a selected polygon corner's Remove corner -> the room inspector's heading (the corner block goes)
+  panel.route = { prefix: PREFIX, path: "/residence/editor/rooms" };
+  await settle(20);
+  const floor = store?.floor;
+  store?.change("Add room", (d) => {
+    d.floors.find((f) => f.key === floor).rooms.push({ id: "smoke-poly", name: "Smoke Poly", x: 400, y: 5, w: 40, h: 30, type: "room", points: [[400, 5], [440, 5], [440, 35], [400, 35]], extra: {} });
+  });
+  store?.select({ kind: "vtx", id: "smoke-poly", sub: 1 });
+  await settle(10);
+  root = tabRoot("jarvis-editor-rooms");
+  now = await activate(root?.querySelector('[aria-labelledby="corner-h"] .actions .jv-btn'));
+  check("focus: Rooms - Remove corner -> the room inspector's heading", !!now && now === root?.querySelector("#insp-h") && store.rooms().find((r) => r.id === "smoke-poly")?.points?.length === 3, describe(now));
+  store?.select(null);
+  while (store?.dirty && store.canUndo) store.undo();
+  await settle(10);
+  check("focus: Rooms - undo removes the polygon room again, clean", !store?.rooms().some((r) => r.id === "smoke-poly") && !store.dirty);
+}
+
+// Settings list editors: appliances in place (/settings/safety, the fixture's
+// Washer and Dryer); the others mounted on their own with what the field row
+// does on a change (re-render, then hand the editor its new value).
+{
+  panel.route = { prefix: PREFIX, path: "/settings/safety" };
+  await settle(20);
+  const appl = deepAll(sr.querySelector("jarvis-view-settings"), "jarvis-editor-appliances")[0];
+  const rows = () => [...(appl?.shadowRoot?.querySelectorAll(".list > .row") ?? [])];
+  const dryer = rows()[1]?.dataset.uid;
+  let now = await activate(rows()[0]?.querySelector("[data-remove]"));
+  check("focus: Settings appliances - Remove on the first row -> the next row's Remove", !!now?.matches("[data-remove]") && now.closest(".row")?.dataset.uid === dryer && rows().length === 1, describe(now));
+  now = await activate(rows()[0]?.querySelector("[data-remove]"));
+  check("focus: Settings appliances - Remove on the only row -> + Add appliance", !!now && now === appl?.shadowRoot?.querySelector(".foot > .jv-btn"), describe(now));
+
+  const box = document.createElement("div");
+  document.body.appendChild(box);
+  const mount = async (tag, props) => {
+    const el = document.createElement(tag);
+    Object.assign(el, { hass: panel.hass, label: tag, ...props });
+    el.onChange = (next) => void Promise.resolve().then(() => { el.value = next; });
+    box.appendChild(el);
+    await settle(5);
+    return el;
+  };
+  const vc = await mount("jarvis-editor-voice-confirm", { data: null, value: ["light.smoke_a", "!switch.smoke_b", "lock.smoke_c"] });
+  const x = (k) => vc.shadowRoot.querySelector(`.rows > li[data-key="${k}"] .x`);
+  now = await activate(x("light.smoke_a"));
+  check("focus: Settings voice confirm - Remove on the first row -> the next row's Remove", !!now?.matches(".x") && now.closest("li")?.dataset.key === "!switch.smoke_b", describe(now));
+  now = await activate(x("lock.smoke_c"));
+  check("focus: Settings voice confirm - Remove on the last row -> the previous row's Remove", !!now?.matches(".x") && now.closest("li")?.dataset.key === "!switch.smoke_b", describe(now));
+  now = await activate(x("!switch.smoke_b"));
+  check("focus: Settings voice confirm - Remove on the only row -> the add picker", !!now && inside(now, vc.shadowRoot.querySelector("jv-picker")), describe(now));
+
+  const pr = await mount("jarvis-editor-pairings", {
+    satellites: [{ entity_id: "assist_satellite.kitchen", label: "Kitchen", name: "Kitchen" }],
+    speakers: [],
+    value: { "assist_satellite.gone_a": "media_player.a", "assist_satellite.gone_b": "media_player.b" },
+  });
+  const orphan = (k) => pr.shadowRoot.querySelector(`.rows > li[data-sat="${k}"] [data-remove]`);
+  now = await activate(orphan("assist_satellite.gone_a"));
+  check("focus: Settings pairings - Remove on the first orphan -> the next orphan's Remove", !!now?.matches("[data-remove]") && now.closest("li")?.dataset.sat === "assist_satellite.gone_b", describe(now));
+  now = await activate(orphan("assist_satellite.gone_b"));
+  check("focus: Settings pairings - Remove on the only orphan -> the satellite's speaker select", !!now?.matches("select, ha-select") && now.closest("li")?.dataset.sat === "assist_satellite.kitchen", describe(now));
+
+  const bm = await mount("jarvis-editor-biometrics-map", { data: null, value: { heart_rate: "sensor.smoke_hr", smoke_a: "sensor.smoke_a", smoke_b: "sensor.smoke_b" } });
+  const kind = (k) => bm.shadowRoot.querySelector(`.rows > li[data-kind="${k}"] .remove`);
+  now = await activate(kind("smoke_a"));
+  check("focus: Settings biometrics - Remove on the first unknown kind -> the next one's Remove", !!now?.matches(".remove") && now.closest("li")?.dataset.kind === "smoke_b", describe(now));
+  now = await activate(kind("smoke_b"));
+  check("focus: Settings biometrics - Remove on the only unknown kind -> the last kind's picker", !!now && inside(now, bm.shadowRoot.querySelector('.rows > li[data-kind="temperature"] jv-picker')), describe(now));
+  box.remove();
+}
 
 // ── editor round trip: add a room via the store, undo, redo, save, reload ──
 {

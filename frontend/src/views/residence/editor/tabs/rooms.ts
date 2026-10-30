@@ -21,6 +21,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { base } from "../../../../theme/base";
 import { t } from "../../../../i18n";
 import { watchDefinitions } from "../../../../ha";
+import { keepFocus } from "../../../../focus";
 import { confirmDialog } from "../../../../components";
 import "../../../../components";
 import { num } from "../../plan";
@@ -365,6 +366,11 @@ export class JarvisEditorRooms extends JarvisEditorTab {
     void this.store?.canvas?.focusHit(raw);
   }
 
+  /** Where a Remove corner hands focus once its block is gone: the room's inspector heading, else (a lot corner) the plan. */
+  private _focusAfterCorner(): HTMLElement | SVGElement | null {
+    return this.renderRoot.querySelector<HTMLElement>("#insp-h") ?? (this.canvas ?? this.store?.canvas)?.shadowRoot?.querySelector<SVGSVGElement>("svg") ?? null;
+  }
+
   private _icon(name: string, fallback = ""): TemplateResult | typeof nothing {
     return jvIcon(name, fallback);
   }
@@ -408,7 +414,7 @@ export class JarvisEditorRooms extends JarvisEditorTab {
     return html`
       <section class="block" aria-labelledby="insp-h">
         <div>
-          <h3 id="insp-h">${r.name || t("Room")}</h3>
+          <h3 id="insp-h" tabindex="-1">${r.name || t("Room")}</h3>
           <span class="sub">${t(roomTypeLabel(r.type))} · ${dim(r.w, u)} × ${dim(r.h, u)} · ${area(roomPoints(r), u)}</span>
         </div>
         <div class="form">
@@ -510,7 +516,7 @@ export class JarvisEditorRooms extends JarvisEditorTab {
           ${jvNumber({ id: "vtx-y", label: t("Y"), suffix: unitLabel(u), value: realOf(p[1], u), step: 0.1, onChange: (v) => { if (v != null) setPt([p[0], this._preciseUnits(v, u)]); } })}
         </div>
         <div class="actions">
-          <button type="button" class="jv-btn" ?disabled=${r.points!.length <= 3} @click=${() => removeCorner(s, r.id, i)}>${this._icon("mdi:vector-point-minus")}<span>${t("Remove corner")}</span></button>
+          <button type="button" class="jv-btn" ?disabled=${r.points!.length <= 3} @click=${(e: Event) => keepFocus(e, this, () => removeCorner(s, r.id, i), () => this._focusAfterCorner())}>${this._icon("mdi:vector-point-minus")}<span>${t("Remove corner")}</span></button>
         </div>
       </div>
     `;
@@ -543,7 +549,7 @@ export class JarvisEditorRooms extends JarvisEditorTab {
           ${jvNumber({ id: "lot-y", label: t("Y"), suffix: unitLabel(u), value: realOf(p[1], u), step: 0.5, onChange: (v) => { if (v != null) setPt([p[0], unitsOf(v, u)]); } })}
         </div>
         <div class="actions">
-          <button type="button" class="jv-btn" ?disabled=${pts.length <= 3} @click=${() => removePropertyCorner(s, i)}>${this._icon("mdi:vector-point-minus")}<span>${t("Remove corner")}</span></button>
+          <button type="button" class="jv-btn" ?disabled=${pts.length <= 3} @click=${(e: Event) => keepFocus(e, this, () => removePropertyCorner(s, i), () => this._focusAfterCorner())}>${this._icon("mdi:vector-point-minus")}<span>${t("Remove corner")}</span></button>
           <button type="button" class="jv-btn text" @click=${() => s.select(null)}>${t("Done")}</button>
         </div>
       </section>

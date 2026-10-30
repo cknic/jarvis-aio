@@ -43,6 +43,7 @@ test.
     src/ws.ts                 ws(hass, type, payload) + WsError; signPath() for /api/ images
     src/i18n.ts               t(key, vars) + loadLanguage() from /jarvis_panel_static/i18n/
     src/ha.ts                 haDefined() / watchDefinitions() feature detection, navigateHa()
+    src/focus.ts              keepRowFocus() / keepFocus(): focus survives a row's Remove; deepActiveElement()
     src/types.ts              Hass, Route, PanelData, ConfigSchema ...
     src/theme/tokens.ts       the --jv-* tokens, all derived from HA theme variables
     src/theme/base.ts         shared styles: grid, buttons, focus ring, visually-hidden
@@ -135,7 +136,10 @@ row, the narrow bottom nav and its More sheet, back button, keyboard,
 failure), walks every Settings section for its tool cards and field editors,
 every floor-plan editor tab in light and dark, and runs an editor round trip
 through `EditorStore` (add a room, undo, redo, save exactly
-`floor_plan_rooms`, reload the saved snapshot without a conflict). It also
+`floor_plan_rooms`, reload the saved snapshot without a conflict), and checks
+that a row's Remove in the editor lists and the Settings list editors leaves
+keyboard focus on the next / previous row (or the list's fallback), not
+`<body>`. It also
 bundles and runs the editor model self-test and checks that every `jarvis/…`
 / `config/…` command literal in `src/` has a `dev/fixtures/` file, that no
 fixture is orphaned, and that every call during the run hit a fixture.

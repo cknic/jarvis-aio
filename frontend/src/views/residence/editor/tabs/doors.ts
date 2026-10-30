@@ -24,6 +24,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { base } from "../../../../theme/base";
 import { t } from "../../../../i18n";
 import { watchDefinitions } from "../../../../ha";
+import { keepRowFocus, type RowFocus } from "../../../../focus";
 import "../../../../components";
 import "../../../../components/jv-picker";
 import type { PickerChangeDetail, PickerItem } from "../../../../components/jv-picker";
@@ -46,6 +47,13 @@ function entityOpenState(hass: Hass | undefined, eid: string): "open" | "closed"
 }
 
 let _seq = 0;
+
+/**
+ * An "Other mapped slots" Remove hands keyboard focus to the next / previous
+ * row's Remove. Those are disabled while the write saves, and the last row
+ * takes the list with it: then the heading, else the slot grid.
+ */
+const REMOVE_FOCUS: RowFocus = { row: ".other > li", key: "data-slot", control: "[data-remove]", fallback: [".sub", "fieldset.slots"] };
 
 @customElement("jarvis-editor-doors")
 export class JarvisEditorDoors extends JarvisEditorTab {
@@ -210,7 +218,7 @@ export class JarvisEditorDoors extends JarvisEditorTab {
       <p class="help">
         ${t("Map the model's doors to your entities. Blank = auto-detect by name. Per-bay garage slots drive the 3D model only; JARVIS's door awareness uses Front, Garage, Garage Side / Rear, Kitchen ↔ Garage, Cellar and Basement.")}
       </p>
-      <fieldset class="slots" aria-label=${t("Doors")} aria-busy=${busy ? "true" : "false"}>
+      <fieldset class="slots" tabindex="-1" aria-label=${t("Doors")} aria-busy=${busy ? "true" : "false"}>
         ${repeat(
           slots,
           (d) => d.slot,
@@ -255,17 +263,17 @@ export class JarvisEditorDoors extends JarvisEditorTab {
       ${status?.level === "error" ? html`<p class="err" role="alert">${t("Save failed — {message}", { message: status.message || "" })}</p>` : nothing}
       ${others.length
         ? html`
-            <h3 class="sub">${t("Other mapped slots")}</h3>
+            <h3 class="sub" tabindex="-1">${t("Other mapped slots")}</h3>
             <ul class="other">
               ${others.map((slot) => {
                 const eid = mapping[slot] ?? "";
                 const name = friendlyName(this.hass, eid);
-                return html`<li>
+                return html`<li data-slot=${slot}>
                   <span class="what">
                     <span class="jv-mono">${slot}</span>
                     <span class="jv-muted jv-truncate">${name}${name !== eid ? html` · <span class="jv-mono">${eid}</span>` : nothing}</span>
                   </span>
-                  <button type="button" class="jv-icon-btn" ?disabled=${busy} aria-label=${t("Remove {name}", { name: slot })} title=${t("Remove")} @click=${() => this._setSlot(slot, "")}>
+                  <button type="button" class="jv-icon-btn" data-remove ?disabled=${busy} aria-label=${t("Remove {name}", { name: slot })} title=${t("Remove")} @click=${(e: Event) => keepRowFocus(e, this, REMOVE_FOCUS, () => this._setSlot(slot, ""))}>
                     ${icon("mdi:close", "×")}
                   </button>
                 </li>`;

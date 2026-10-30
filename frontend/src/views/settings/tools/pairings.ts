@@ -14,9 +14,13 @@ import { registerFieldEditor } from "../registry";
 import { base } from "../../../theme/base";
 import { t } from "../../../i18n";
 import { watchDefinitions } from "../../../ha";
+import { keepRowFocus, type RowFocus } from "../../../focus";
 import type { Hass, PanelData } from "../../../types";
 import "../../../components";
 import { CONTROL_TAGS, controlStyles, renderSelect, friendlyName, type SelectOption } from "./lists-controls";
+
+/** An orphan's Remove hands keyboard focus to the next / previous orphan's Remove, else the last satellite's select, else the empty note. */
+const REMOVE_FOCUS: RowFocus = { row: ".rows > li", key: "data-sat", control: ["[data-remove]", "ha-select, select"], fallback: [".empty"] };
 
 export interface SatelliteRow {
   entity_id: string;
@@ -141,7 +145,7 @@ export class JarvisEditorPairings extends LitElement {
     const known = new Set(this.satellites.map((s) => s.entity_id));
     const orphans = Object.keys(this.value).filter((k) => !known.has(k));
     if (!this.satellites.length && !orphans.length) {
-      return html`<p class="empty" id=${this.controlId || nothing}>${t("No satellites found")}</p>`;
+      return html`<p class="empty" tabindex="-1" id=${this.controlId || nothing}>${t("No satellites found")}</p>`;
     }
     return html`
       <ul class="rows" role="group" aria-label=${this.label} id=${this.controlId || nothing}>
@@ -149,7 +153,7 @@ export class JarvisEditorPairings extends LitElement {
           const sid = `${this.controlId || "pair"}-${i}`;
           const current = this.value[s.entity_id] ?? "";
           return html`
-            <li>
+            <li data-sat=${s.entity_id}>
               <label class="text" for=${sid}>
                 <span class="name">${s.label}</span>
                 <span class="sec jv-mono">${s.entity_id}</span>
@@ -169,13 +173,15 @@ export class JarvisEditorPairings extends LitElement {
         })}
         ${orphans.map(
           (sat) => html`
-            <li class="orphan">
+            <li class="orphan" data-sat=${sat}>
               <span class="text">
                 <span class="name">${friendlyName(this.hass, sat)} <span class="tag">${t("satellite not found")}</span></span>
                 <span class="sec jv-mono">${sat} → ${this.value[sat]}</span>
               </span>
               <span class="ctl">
-                <button type="button" class="jv-btn" ?disabled=${this.disabled} @click=${() => this._set(sat, "")}>${t("Remove")}</button>
+                <button type="button" class="jv-btn" data-remove ?disabled=${this.disabled} aria-label=${t("Remove {name}", { name: friendlyName(this.hass, sat) })} @click=${(e: Event) => keepRowFocus(e, this, REMOVE_FOCUS, () => this._set(sat, ""))}>
+                  ${t("Remove")}
+                </button>
               </span>
             </li>
           `,

@@ -16,11 +16,15 @@ import { registerFieldEditor } from "../registry";
 import { base } from "../../../theme/base";
 import { t } from "../../../i18n";
 import { watchDefinitions } from "../../../ha";
+import { keepRowFocus, type RowFocus } from "../../../focus";
 import type { Hass, PanelData } from "../../../types";
 import "../../../components";
 import "../../../components/jv-picker";
 import type { PickerChangeDetail } from "../../../components/jv-picker";
 import { CONTROL_TAGS, controlStyles } from "./lists-controls";
+
+/** An unknown kind's Remove hands keyboard focus to the next / previous one's, else the last kind's picker above. */
+const REMOVE_FOCUS: RowFocus = { row: ".rows > li", key: "data-kind", control: [".remove", "jv-picker"] };
 
 /** kind -> label; functions so the t() keys stay literals (npm run i18n:keys) */
 export const BIOMETRIC_KINDS: Array<[string, () => string]> = [
@@ -133,7 +137,7 @@ export class JarvisEditorBiometricsMap extends LitElement {
           const name = label();
           const v = map[kind];
           return html`
-            <li>
+            <li data-kind=${kind}>
               <span class="text">
                 <span class="name">${name}</span>
                 <span class="sec jv-mono">${kind}</span>
@@ -155,12 +159,12 @@ export class JarvisEditorBiometricsMap extends LitElement {
           const v = map[kind];
           const shown = typeof v === "string" ? v : JSON.stringify(v);
           return html`
-            <li class="unknown" title=${kind}>
+            <li class="unknown" title=${kind} data-kind=${kind}>
               <span class="text">
                 <span class="name jv-mono">${kind}</span>
                 <span class="sec">${t("unknown kind")} · <span class="jv-mono">${shown}</span></span>
               </span>
-              <button type="button" class="remove" ?disabled=${this.disabled} aria-label=${t("Remove {name}", { name: kind })} @click=${() => this._set(kind, "")}>${t("Remove")}</button>
+              <button type="button" class="remove" ?disabled=${this.disabled} aria-label=${t("Remove {name}", { name: kind })} @click=${(e: Event) => keepRowFocus(e, this, REMOVE_FOCUS, () => this._set(kind, ""))}>${t("Remove")}</button>
             </li>
           `;
         })}

@@ -19,6 +19,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { base } from "../../../../theme/base";
 import { t } from "../../../../i18n";
 import { watchDefinitions } from "../../../../ha";
+import { keepRowFocus, type RowFocus } from "../../../../focus";
 import "../../../../components";
 import { JarvisEditorTab } from "../tab-base";
 import { registerLayer, hitOf, LAYER_ORDER, type Layer, type CanvasDragEvent } from "../canvas";
@@ -207,6 +208,9 @@ registerLayer(openingsLayer);
 // ── the tab ─────────────────────────────────────────────────────────────────
 let _seq = 0;
 
+/** A row's Remove hands keyboard focus to the next / previous row's Remove, else the first add button. */
+const REMOVE_FOCUS: RowFocus = { row: ".row", key: "data-id", control: "[data-remove]", fallback: [".toolbar .jv-btn"] };
+
 @customElement("jarvis-editor-openings")
 export class JarvisEditorOpenings extends JarvisEditorTab {
   static override styles = [
@@ -377,7 +381,7 @@ export class JarvisEditorOpenings extends JarvisEditorTab {
             <span class="dot" aria-hidden="true"></span>${name}
           </button>
           <span class="grow jv-muted jv-truncate where">${placement(o)}</span>
-          <button type="button" class="jv-icon-btn" aria-label=${t("Remove {name}", { name })} title=${t("Remove")} @click=${() => this._remove(o)}>${icon("mdi:close", "×")}</button>
+          <button type="button" class="jv-icon-btn" data-remove aria-label=${t("Remove {name}", { name })} title=${t("Remove")} @click=${(e: Event) => keepRowFocus(e, this, REMOVE_FOCUS, () => this._remove(o))}>${icon("mdi:close", "×")}</button>
         </div>
         <div class="row-fields">
           ${roomAnchored

@@ -32,6 +32,7 @@ import { base } from "../../../../theme/base";
 import { t } from "../../../../i18n";
 import { watchDefinitions } from "../../../../ha";
 import { ws, WsError, signPath } from "../../../../ws";
+import { keepRowFocus, type RowFocus } from "../../../../focus";
 import "../../../../components";
 import "../../../../components/jv-picker";
 import type { PickerChangeDetail } from "../../../../components/jv-picker";
@@ -53,6 +54,10 @@ const CMD = "jarvis/compute_camera_coverage";
 const BADGE_LEVELS = new Set(["ok", "warn", "danger", "info", "neutral", "accent"]);
 const norm360 = (a: number): number => ((Math.round(a) % 360) + 360) % 360;
 const trunc = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
+/** A camera's Remove / Delete hands keyboard focus to the next / previous camera's Remove, else + Camera. */
+const CAMERA_FOCUS: RowFocus = { row: ".rows > .row", key: "data-key", control: "[data-remove]", fallback: [".toolbar .jv-btn"] };
+/** A pin's Remove hands keyboard focus to the next / previous pin's Remove, else the add picker. */
+const PIN_FOCUS: RowFocus = { row: ".chips > .chip", key: "data-key", control: "[data-remove]", fallback: [".add-pin jv-picker"] };
 
 /** "CAM 2" - the 1-based index of the camera on its floor. */
 function camLabel(doc: EditorDoc, floor: FloorKey, id: string): string {
@@ -947,7 +952,7 @@ export class JarvisEditorPins extends JarvisEditorTab {
             <span class="jv-truncate">${who}</span>
             <span class="jv-muted xs">${summary}</span>
           </span>
-          <button type="button" class="jv-icon-btn" aria-label=${t("Remove {name}", { name })} title=${t("Remove")} @click=${() => removeCamera(s, id)}>${icon("mdi:close", "×")}</button>
+          <button type="button" class="jv-icon-btn" data-remove aria-label=${t("Remove {name}", { name })} title=${t("Remove")} @click=${(e: Event) => keepRowFocus(e, this, CAMERA_FOCUS, () => removeCamera(s, id))}>${icon("mdi:close", "×")}</button>
         </div>
         <div class="row-body">
           ${thumb
@@ -1073,7 +1078,7 @@ export class JarvisEditorPins extends JarvisEditorTab {
           <button type="button" class="jv-btn" ?disabled=${busy} @click=${() => void this._compute([id])}>
             ${this._busy && this._busy.n === 1 ? t("Computing… {i}/{n}", { i: 1, n: 1 }) : t("Compute coverage")}
           </button>
-          <button type="button" class="jv-btn danger" @click=${() => removeCamera(s, id)}>${t("Delete")}</button>
+          <button type="button" class="jv-btn danger" @click=${(e: Event) => keepRowFocus(e, this, CAMERA_FOCUS, () => removeCamera(s, id))}>${t("Delete")}</button>
         </div>
       </div>
     `;
@@ -1138,7 +1143,7 @@ export class JarvisEditorPins extends JarvisEditorTab {
           <jv-state-badge level=${level} .label=${t(st.value)}></jv-state-badge>
         </button>
         <button type="button" class="jv-icon-btn" aria-label=${t("Open controls")} title=${t("Open controls")} @click=${() => moreInfo(this, p.e)}>${icon("mdi:open-in-new", "↗")}</button>
-        <button type="button" class="jv-icon-btn" aria-label=${t("Remove {name}", { name: st.name })} title=${t("Remove")} @click=${() => removePin(s, p.e, floor)}>${icon("mdi:close", "×")}</button>
+        <button type="button" class="jv-icon-btn" data-remove aria-label=${t("Remove {name}", { name: st.name })} title=${t("Remove")} @click=${(e: Event) => keepRowFocus(e, this, PIN_FOCUS, () => removePin(s, p.e, floor))}>${icon("mdi:close", "×")}</button>
       </li>
     `;
   }

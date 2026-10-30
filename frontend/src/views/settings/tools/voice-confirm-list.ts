@@ -18,6 +18,7 @@ import { registerFieldEditor } from "../registry";
 import { base } from "../../../theme/base";
 import { t } from "../../../i18n";
 import { watchDefinitions } from "../../../ha";
+import { keepRowFocus, type RowFocus } from "../../../focus";
 import type { Hass, PanelData } from "../../../types";
 import "../../../components";
 import "../../../components/jv-picker";
@@ -25,6 +26,8 @@ import type { PickerChangeDetail } from "../../../components/jv-picker";
 import { CONTROL_TAGS, controlStyles, friendlyName } from "./lists-controls";
 
 const EXEMPT = "!";
+/** A row's × hands keyboard focus to the next / previous row's ×, else the add picker. */
+const REMOVE_FOCUS: RowFocus = { row: ".rows > li", key: "data-key", control: ".x", fallback: ["jv-picker"] };
 
 function strList(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x !== "") : [];
@@ -175,7 +178,7 @@ export class JarvisEditorVoiceConfirm extends LitElement {
     const missing = !!this.hass?.states && !this.hass.states[id];
     const off = this.disabled;
     return html`
-      <li class=${missing ? "missing" : ""} title=${entry}>
+      <li class=${missing ? "missing" : ""} title=${entry} data-key=${entry}>
         <span class="text">
           <span class="name">${name}</span>
           ${name !== id ? html`<span class="sec jv-mono">${id}</span>` : nothing}
@@ -191,7 +194,7 @@ export class JarvisEditorVoiceConfirm extends LitElement {
             <button type="button" class="jv-hit" aria-pressed=${exempt ? "false" : "true"} ?disabled=${off} @click=${() => this._setExempt(index, false)}>${t("Require")}</button>
             <button type="button" class="jv-hit" aria-pressed=${exempt ? "true" : "false"} ?disabled=${off} @click=${() => this._setExempt(index, true)}>${t("Exempt")}</button>
           </span>
-          <button type="button" class="x" aria-label=${t("Remove {name}", { name })} ?disabled=${off} @click=${() => this._remove(index)}>×</button>
+          <button type="button" class="x" aria-label=${t("Remove {name}", { name })} ?disabled=${off} @click=${(e: Event) => keepRowFocus(e, this, REMOVE_FOCUS, () => this._remove(index))}>×</button>
         </span>
       </li>
     `;

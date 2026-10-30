@@ -323,6 +323,10 @@ header of `selftest.ts`).
   agreed keys - reuse them byte for byte.
 * No `confirm()` / `prompt()`: `confirmDialog({...})` from `../../../components`
   for destructive things; otherwise an undoable change + `store.toast(..., {label: t("Undo"), run: () => store.undo()})`.
+* A row's Remove goes through `keepRowFocus(e, this, spec, () => remove())`
+  (`src/focus.ts`, DESIGN.md §8) so keyboard focus moves to the next /
+  previous row instead of `<body>`; an object removed from the canvas leaves
+  focus on the plan (`canvas.focusSurface()`).
 * Loading / empty / error states per DESIGN.md §6; backend errors are
   `WsError.message`.
 * Before hand-over: `npm run check`, `npm run lint:theme`, `npm run build`,

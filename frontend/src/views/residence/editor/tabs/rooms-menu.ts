@@ -10,6 +10,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../../../../theme/base";
 import { haDefined } from "../../../../ha";
+import { deepActiveElement } from "../../../../focus";
 
 export interface MenuItem {
   label: string;
@@ -27,13 +28,6 @@ export interface MenuOptions {
 }
 
 let _current: JarvisPlanMenu | null = null;
-
-/** The element that really has focus: document.activeElement descended through every open shadow root. */
-function deepActiveElement(): Element | null {
-  let a: Element | null = document.activeElement;
-  while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
-  return a;
-}
 
 @customElement("jarvis-plan-menu")
 export class JarvisPlanMenu extends LitElement {
