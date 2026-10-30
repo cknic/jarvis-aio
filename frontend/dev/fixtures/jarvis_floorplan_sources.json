@@ -1,0 +1,14 @@
+{
+  "sources": [
+    {
+      "entity_id": "image.roborock_s7_map",
+      "name": "Roborock S7 Map",
+      "domain": "image"
+    },
+    {
+      "entity_id": "camera.valetudo_map",
+      "name": "Valetudo Map",
+      "domain": "camera"
+    }
+  ]
+}

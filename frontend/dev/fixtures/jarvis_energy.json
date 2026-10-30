@@ -1,0 +1,18 @@
+{
+  "watts": 9240,
+  "kw": 9.24,
+  "meter": "sensor.house_power",
+  "peak_watts": 8000,
+  "over_peak": true,
+  "agency": "opt_in",
+  "configured_agency": "advisory",
+  "running": [
+    { "name": "EV Charger", "entity": "switch.ev_charger", "watts": 7200, "shed_ok": true },
+    { "name": "Dryer", "entity": "sensor.dryer_power", "watts": 1450, "shed_ok": true },
+    { "name": "Fridge", "entity": "sensor.fridge_power", "watts": 160, "shed_ok": false }
+  ],
+  "advice": [
+    "You're drawing 9.2 kW, above your 8.0 kW peak.",
+    "EV Charger is the biggest load right now (7.2 kW) and can be paused safely."
+  ]
+}

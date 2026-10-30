@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "cameras": [
+    {
+      "entity_id": "camera.front_door",
+      "name": "Front Door",
+      "raw_name": "Front Door",
+      "outdoor": true,
+      "location_mode": "auto"
+    },
+    {
+      "entity_id": "camera.kitchen",
+      "name": "Kitchen",
+      "raw_name": "Kitchen Cam",
+      "outdoor": false,
+      "location_mode": "manual"
+    },
+    {
+      "entity_id": "camera.garage",
+      "name": "Garage",
+      "raw_name": "Garage",
+      "outdoor": false,
+      "location_mode": "auto"
+    }
+  ]
+}

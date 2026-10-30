@@ -16,6 +16,7 @@ import { t } from "../i18n";
 import { haDefined, watchDefinitions } from "../ha";
 import { WsError } from "../ws";
 import "../components";
+import "./residence/editor/editor";
 import { fixedBox, renderSVG, type Box, type Floor, type PlanFeet } from "./residence/house3d";
 import { buildPalette, paletteKey } from "./residence/palette";
 import { residenceStyles } from "./residence/styles";
@@ -236,6 +237,10 @@ export class JarvisViewResidence extends JarvisView {
 
   // ── render ────────────────────────────────────────────────────────────
   override render() {
+    // /jarvis/residence/editor[/<tab>] -> the floor-plan editor instead of the overview cards
+    if (this.subPath.split("/")[0] === "editor") {
+      return html`<jarvis-plan-editor .hass=${this.hass} .narrow=${this.narrow} .data=${this.data} .route=${this.route}></jarvis-plan-editor>`;
+    }
     if (!this.data) {
       return html`
         <div class="res">
@@ -278,6 +283,7 @@ export class JarvisViewResidence extends JarvisView {
             )}
           </fieldset>
           <span class="hint" aria-hidden="true">${t("drag to rotate")}</span>
+          <button type="button" class="jv-btn" @click=${() => this.navigate("residence", "editor")}>${t("Edit floor plan")}</button>
           <span class="visually-hidden" id="drag-hint">${t("Drag with the pointer or use the left and right arrow keys to rotate the model; Home resets the view.")}</span>
         </div>
         ${this._renderScene()}

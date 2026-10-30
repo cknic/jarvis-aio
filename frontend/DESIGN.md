@@ -74,6 +74,7 @@ element styled with tokens; call `watchDefinitions(this, ["ha-xxx"])` in
 | key/value row          | `<jv-kv label value mono stacked>` (or slot a badge)          | -                                          |
 | empty / loading / error| `<jv-empty kind="empty|loading|error" icon heading message>` + `<x slot="action">` | -                       |
 | snapshot image         | `signPath(hass, "/api/jarvis/snapshot/...")` then `<img src=${signed}>` | - (an unsigned `/api/` src fails the smoke test) |
+| entity / area / label picker | `<jv-picker kind multiple .hass .value @value-changed>` (src/components/jv-picker.ts; wraps `ha-selector` / HA pickers) | (built in - chips + combobox) |
 
 Shared components (`src/components/`) are frozen: add your own under
 `src/views/<key>/` instead of editing them.
@@ -96,8 +97,9 @@ Shared components (`src/components/`) are frozen: add your own under
   `<input>` / `<select>` get `min-height: var(--jv-tap)` instead.
 * Sticky things inside a view sit below the panel's app bar: use
   `top: calc(var(--jv-sticky-top, 0px) + <gap>)`. The panel sets
-  `--jv-sticky-top` on its host (56 px, plus the 48 px tab row below 1100 px)
-  and uses it for `scroll-padding`, so focus and `scrollIntoView` never land
+  `--jv-sticky-top` (56 px, plus the 48 px tab row while the panel is narrower
+  than 1560 px and the tabs take their own line) and uses it for
+  `scroll-padding`, so focus and `scrollIntoView` never land
   under the header or the bottom nav.
 * No fixed heights on text containers; no `overflow: hidden` that clips
   text; long values wrap (`overflow-wrap: anywhere`) or truncate with

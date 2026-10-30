@@ -411,6 +411,34 @@ async def async_apply(hass: HomeAssistant, entry, key: str, value) -> dict:
     return {"key": key, "value": value, "updates": updates}
 
 
+async def async_apply_many(hass: HomeAssistant, entry, updates: dict) -> dict:
+    """Write several panel-writable settings that need no side effects
+    (feature toggles, entity lists) in one go: ``runtime_config`` first, then
+    ``jarvis_config.set_many``, then one coordinator refresh / mirror signal.
+
+    Used by the purpose-built WS handlers (biometrics, semantic search, camera
+    location) so they stop writing config.json behind ``runtime_config``'s
+    back — which left Settings and the native entities showing the old value
+    until a restart. Keys with side effects (observer, providers) must go
+    through :func:`async_apply`. Raises ``ValueError`` for a key outside
+    ``PANEL_WRITABLE_KEYS``; with no entry/runtime data it still persists, and
+    a persistence failure is logged, not raised (as in :func:`async_apply`).
+    """
+    bad = [k for k in updates if k not in writable_keys()]
+    if bad:
+        raise ValueError(f"Keys not writable from the panel: {bad}")
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id) if entry is not None else None
+    if isinstance(data, dict):
+        data.setdefault("runtime_config", {}).update(updates)
+    try:
+        from . import jarvis_config
+        await hass.async_add_executor_job(jarvis_config.set_many, dict(updates))
+    except Exception as exc:  # same as async_apply: the live value still applies
+        _LOGGER.debug("Config persist note: %s", exc)
+    _notify_changed(hass, updates)
+    return dict(updates)
+
+
 def _notify_changed(hass: HomeAssistant, updates: dict) -> None:
     """Refresh the snapshot coordinator and tell setting-mirror entities.
     Best effort — the HA helpers involved are absent under the unit stubs."""

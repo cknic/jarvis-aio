@@ -2363,6 +2363,18 @@
    "expose": false
   },
   {
+   "key": "goals_kernel_authoritative",
+   "kind": "bool",
+   "label": "Kernel plan authoritative for goals",
+   "category": "governance",
+   "default": true,
+   "options": null,
+   "min": null,
+   "max": null,
+   "step": null,
+   "expose": false
+  },
+  {
    "key": "friday_automator",
    "kind": "bool",
    "label": "FRIDAY automator",
@@ -2499,7 +2511,7 @@
   "imap_folder": "INBOX",
   "imap_ssl": true,
   "llm_provider": "groq",
-  "model": "",
+  "model": "llama3-70b-8192",
   "llm_base_url": "",
   "custom_base_url": "",
   "ollama_base_url": "",
@@ -2518,7 +2530,10 @@
   "classifier_rate_limit": 30,
   "voice_confirm_enabled": false,
   "voice_confirm_mode": "auto",
-  "voice_confirm_entities": [],
+  "voice_confirm_entities": [
+   "light.living_room",
+   "!camera.front_door"
+  ],
   "tts_use_ha_voice": false,
   "proximity_volume": true,
   "continued_conversation_enabled": false,
@@ -2581,7 +2596,20 @@
   "hazard_quake_radius_km": 300.0,
   "hazard_quake_min_mag": 2.5,
   "hazard_disaster_radius_km": 300.0,
-  "appliance_profile": [],
+  "appliance_profile": [
+   {
+    "name": "Washer",
+    "type": "washer",
+    "entity": "sensor.washer_power",
+    "watts": 500
+   },
+   {
+    "name": "Dryer",
+    "type": "dryer",
+    "entity": "",
+    "watts": 2400
+   }
+  ],
   "appliance_announce_unknown": false,
   "appliance_power_guessing": false,
   "camera_auto_analyze": true,
@@ -2629,6 +2657,7 @@
   "movie_media_player": "",
   "movie_dim_pct": 15,
   "autonomy_enforce": false,
+  "goals_kernel_authoritative": true,
   "friday_automator": false,
   "operational_mode_auto": true,
   "custom_modes": {},

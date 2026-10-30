@@ -1201,10 +1201,15 @@ async def test_semantic_search_commands_cover_action_paths(fake_hass, monkeypatc
     persisted = []
     probes = []
     config = _install_jc_module(monkeypatch, "jarvis_config", types.SimpleNamespace(
-        set=lambda key, value: persisted.append((key, value)),
+        set_many=lambda updates: persisted.extend(updates.items()),
         get=lambda key, default=None: True if key == "semantic_search" else default,
     ))
     del config
+    # enable/disable go through config_apply.async_apply_many, which mirrors the
+    # value into the entry's runtime_config as well as persisting it
+    entry = types.SimpleNamespace(entry_id="sem", data={}, options={})
+    fake_hass.config_entries.async_entries = lambda domain: [entry]
+    fake_hass.data = {websocket.DOMAIN: {entry.entry_id: {}}}
     embeddings = _install_jc_module(monkeypatch, "embeddings", types.SimpleNamespace(
         init_store=lambda: None,
         probe=lambda hass: _resolved(probes.append("probe") or {"ok": True, "model": "embed", "dim": 4}),
@@ -1227,6 +1232,7 @@ async def test_semantic_search_commands_cover_action_paths(fake_hass, monkeypatc
         "model": "embed-model", "vector_count": 9,
     })
     assert persisted == [("semantic_search", True), ("semantic_search", False)]
+    assert fake_hass.data[websocket.DOMAIN]["sem"]["runtime_config"] == {"semantic_search": False}
     assert probes == ["probe", "probe"]
 
 
@@ -1279,10 +1285,14 @@ async def test_biometrics_energy_hazard_mode_and_health_commands(
     connection = _Conn()
     persisted = []
     config = _install_jc_module(monkeypatch, "jarvis_config", types.SimpleNamespace(
-        set=lambda key, value: persisted.append((key, value)),
+        set_many=lambda updates: persisted.extend(updates.items()),
+        set=lambda key, value: persisted.append((key, value)),  # ws_energy still uses it
         get=lambda key, default=None: True,
     ))
     del config
+    entry = types.SimpleNamespace(entry_id="bio", data={}, options={})
+    fake_hass.config_entries.async_entries = lambda domain: [entry]
+    fake_hass.data = {websocket.DOMAIN: {entry.entry_id: {}}}
     biometrics = _install_jc_module(monkeypatch, "biometrics", types.SimpleNamespace(
         discover=lambda config, states: {"sleep": [{"entity_id": "sensor.sleep"}]},
     ))
@@ -1297,6 +1307,7 @@ async def test_biometrics_energy_hazard_mode_and_health_commands(
     })
     await websocket.ws_biometrics(fake_hass, connection, {"id": 92, "action": "disable"})
     assert persisted == [("biometrics_enabled", True), ("biometrics_enabled", False)]
+    assert fake_hass.data[websocket.DOMAIN]["bio"]["runtime_config"] == {"biometrics_enabled": False}
 
     energy = _install_jc_module(monkeypatch, "energy", types.SimpleNamespace(
         AGENCY_ADVISORY="advisory", AGENCY_OPT_IN="opt_in", AGENCY_AUTONOMOUS="autonomous",
@@ -1905,6 +1916,9 @@ async def test_camera_snapshot_rename_location_and_diagnostics(fake_hass, monkey
         ),
     ))
     del outdoor
+    loc_entry = types.SimpleNamespace(entry_id="loc", data={}, options={})
+    fake_hass.config_entries.async_entries = lambda domain: [loc_entry]
+    fake_hass.data = {websocket.DOMAIN: {loc_entry.entry_id: {}}}
     await websocket.ws_camera_location(fake_hass, connection, {
         "id": 135, "entity_id": "camera.front", "mode": "indoor",
     })
@@ -1914,6 +1928,7 @@ async def test_camera_snapshot_rename_location_and_diagnostics(fake_hass, monkey
     assert saved[-1] == {
         "indoor_entities": ["camera.front"], "outdoor_entities": [],
     }
+    assert fake_hass.data[websocket.DOMAIN]["loc"]["runtime_config"] == saved[-1]
 
     entity_registry = sys.modules["homeassistant.helpers.entity_registry"]
     monkeypatch.setattr(entity_registry, "async_get", lambda hass: types.SimpleNamespace(

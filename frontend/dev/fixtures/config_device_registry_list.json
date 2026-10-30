@@ -1,0 +1,5 @@
+[
+  { "id": "dev_front_door_cam", "name": "Front Door Camera", "name_by_user": null, "area_id": "back_yard", "manufacturer": "Reolink", "model": "RLC-810A", "disabled_by": null },
+  { "id": "dev_living_room_sat", "name": "ESP32-S3-BOX", "name_by_user": "Living Room Satellite", "area_id": "living_room", "manufacturer": "Espressif", "model": "S3-BOX-3", "disabled_by": null },
+  { "id": "dev_washer", "name": "Washer Plug", "name_by_user": null, "area_id": null, "manufacturer": "Shelly", "model": "Plug S", "disabled_by": null }
+]

@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "found": 3,
+  "entities": [
+    {"kind": "heart_rate", "entity": "sensor.sam_watch_heart_rate", "value": "64", "unit": "bpm", "name": "Sam Watch Heart rate"},
+    {"kind": "sleep_state", "entity": "binary_sensor.sam_watch_asleep", "value": "off", "unit": "", "name": "Sam Watch Asleep"},
+    {"kind": "steps", "entity": "sensor.sam_watch_steps", "value": "4210", "unit": "steps", "name": "Sam Watch Steps"}
+  ]
+}

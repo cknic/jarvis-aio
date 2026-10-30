@@ -141,9 +141,9 @@ administrators. Full entity list and dashboard walkthrough:
   hazard tools, the mute list, "brief me now" (the `jarvis.briefing` service
   and the example dashboard button remain), the onboarding card, area
   sparklines, and all HUD chrome (masthead clock and greeting, global search,
-  gauges, status dump). Chat lives in Assist. Strings new to this panel show
-  in English in every language until the translation pass
-  (`npm run i18n:keys` lists them). The legacy
+  gauges, status dump). Chat lives in Assist. Strings new to this panel are
+  translated in Phase 3 (below; `npm run i18n:keys` lists any still
+  missing). The legacy
   `custom_components/jarvis/frontend/dev/` 3D tools and
   `scripts/render_residence.js` (which drove the removed HUD element) were
   removed; the harness renders the model instead.
@@ -171,11 +171,107 @@ administrators. Full entity list and dashboard walkthrough:
   key, an enum with a stored value outside its options shows the row
   warning, and the Intrusion Log hides its count on a load error.
 
-What stays panel-only (admins): the 3D Residence view, teaching and forgetting
-facts, labelling intrusion events, applying suggestions, the full settings
-catalogue, logs and the governance switches — and, once Phase 3 ports them,
-the floor-plan editor, faces and voices, documents, camera diagnostics and
-doorbell training.
+### Phase 3 — the rest of the panel
+
+Everything the old panel's tabs did is back, on the Phase 2 rules (HA theme
+tokens only, 360 px, keyboard and screen reader, HA elements feature-detected
+with fallbacks). The new screens use the `jarvis/*` commands and `jarvis.*`
+services the old panel called. One backend fix came out of the review:
+`jarvis/biometrics`, `jarvis/semantic_search`, `jarvis/camera_location` and
+`jarvis/energy` (agency) wrote `config.json` only, so the in-memory `runtime_config`, Settings and the
+native setting entities kept the old value until a restart. They now go
+through `config_apply.async_apply_many`, like every other settings write.
+
+- **Ten views.** The shell gained **Cameras**, **People** and **Documents**.
+  On a wide screen the tab row scrolls horizontally instead of wrapping (a
+  chevron on each overflowing edge and the vertical mouse wheel scroll it;
+  it shares the app bar's line only when the panel is at least 1560 px
+  wide); on a phone the bottom nav shows Overview, Intrusion, Residence and
+  Settings plus **More**, a focus-trapped bottom sheet with the other six (the More item
+  shows the open view as current). Below 380 px only the current item keeps
+  its label.
+- **Cameras** (`/jarvis/cameras`): Camera Watch with a live tile per camera
+  whose frame chain falls back from HA's `ha-camera-stream` to the signed
+  MJPEG stream, signed stills and `jarvis/camera_snapshot`, each tier with a
+  watchdog; the DIAG panel (`jarvis/camera_diagnostics`); *Analyze now*
+  (`jarvis.analyze_camera`, confirmed); per-camera use switch
+  (`disabled_cameras`), JARVIS-only name (`jarvis/rename_camera`) and
+  Auto / Indoor / Outdoor (`jarvis/camera_location`); Doorbell Training
+  (`jarvis.train_doorbell_backlog`, `jarvis.diagnose_doorbell`, the recent
+  events). A camera event or a confident face recognition focuses its camera
+  for 25 s.
+- **People** (`/jarvis/people`): household residents with last-seen frames
+  and reference photos (file, past sighting, *Snapshot now*), recently seen
+  guests and unknown faces (*Make resident*, *Name this face*), voiceprints
+  with enrolment and identification from a 4 s browser-microphone clip,
+  the wellbeing context opt-in (`jarvis/biometrics`) and the face-recognition
+  options. All images go through signed URLs or data URLs; removals confirm.
+- **Documents** (`/jarvis/documents`): the library (`jarvis/documents`
+  status, upload up to 3 MB, ingest, watch-folder scan, confirmed delete, with
+  the backend's own messages shown verbatim), document search, the keyword /
+  semantic engine with its probe (`jarvis/semantic_search`) and a search over
+  past conversations (`jarvis/search_memory`).
+- **The floor-plan editor** (`/jarvis/residence/editor[/<tab>]`, *Edit floor
+  plan* on Residence): one SVG canvas with Pointer Events (mouse, touch, pen,
+  pinch, long-press menus, grid and edge snapping) and full keyboard control,
+  five tabs — **Rooms** (rectangles and polygons, area-name matching, types,
+  floors, the property line and the house-shape keys), **Openings** (windows,
+  doors, cased openings, dormers on outer or room walls, optional sensor),
+  **Doors** (`door_mapping` for the model's door slots), **Cameras & pins**
+  (aim, field of view and range with a wall-clipped line-of-sight cone,
+  AI coverage per camera through `jarvis/compute_camera_coverage`, entity
+  pins with live state) and **Import** (vacuum-map or image entity as
+  background via `jarvis/floorplan_sources` / `jarvis/import_floorplan`, room
+  detection via `jarvis/segment_floorplan_rooms` with a review step, an image
+  file with opacity and alignment, SweetHome3D `.sh3d` / XML / JSON converted
+  in the browser, JSON export / import of the whole plan, reset to the sample
+  home). Plan edits live on a working copy with undo / redo and are saved
+  explicitly, one `jarvis/update_config` per changed `floor_plan_*` key;
+  background, opacity, units, door mapping and house keys save immediately.
+  A dirty copy is never overwritten by another client's change (Reload / Keep
+  mine banner). The 3D preview renders the serialised plan with the Residence
+  view's own code.
+- **Settings tools.** Field editors and tool cards plug into the generic
+  Settings view through `settings/registry.ts` (`registerFieldEditor`,
+  `registerToolCard`, one `SettingsHost` write path): **AI Models** per role
+  with the live list from `jarvis/list_models` and a fix-it button for a
+  retired model; `jv-picker` entity / area / domain / label pickers for every
+  id-list key; satellite → speaker pairings; announcement speakers; Sentinel
+  rules; the appliance row editor; and the **Briefings** (*Brief me now*),
+  **Diagnostics** (service test buttons), **Voice Confirmation** test,
+  **Energy**, **Hazard** (confirmed scan), **Muted Announcements**,
+  **Wellbeing** and **Governance** cards. Deep links
+  `/jarvis/settings/<section>/tool:<id>`. The "Not yet ported" lists are
+  gone; cards that now live in another view are linked under *Elsewhere in
+  the panel*.
+- **Logs → Governance is read-only.** It summarises the kill-switches
+  (capabilities ON, safety guards ON, overrides, anything off its default)
+  and links to Settings › Governance, the one place that writes them.
+- **Tests and tooling.** The smoke test now also walks every Settings
+  section's tool cards and editors and every editor tab in light and dark,
+  runs an editor round trip through its store (add a room, undo, redo, save
+  exactly `floor_plan_rooms`, reload without a conflict), runs the editor
+  model self-test, fails on any error state with the fixtures, and checks
+  that every WebSocket command in the sources has a fixture (and none is
+  orphaned). `npm run i18n:report` writes `frontend/i18n-missing.json`, the
+  per-language list of untranslated keys for translators (`npm run all`
+  regenerates it). The unused legacy `jarvis-logo.png` is removed from the
+  HACS payload.
+- **Translated, still untested on real hardware.** The roughly 1,100 panel
+  strings from Phases 2 and 3 now have entries in all 22 languages (a
+  machine-assisted pass, so corrections from native speakers are welcome;
+  `npm run i18n:keys` and `frontend/i18n-missing.json` list anything newer).
+  The HA-element branches
+  (`ha-camera-stream`, `ha-selector`, `ha-dialog`), the browser microphone
+  and signed camera stills were exercised only through the fallbacks in the
+  harness and the smoke test. Not ported: the `jarvis_doorbell_diag` result
+  in the panel, the onboarding card and area sparklines.
+  Details: [docs/panel.md](docs/panel.md).
+
+What stays panel-only (admins): the 3D Residence view and the floor-plan
+editor, faces and voices, documents, camera tools and doorbell training,
+teaching and forgetting facts, labelling intrusion events, applying
+suggestions, the full settings catalogue, logs and the governance switches.
 
 `manifest.json` still reads `9.39.0`; the fork version is a changelog marker
 until the first tagged fork release.

@@ -184,6 +184,10 @@ const HELP: Record<string, string> = {
   voice_confirm_enabled:
     "Ask out loud before sensitive actions (unlock, garage, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker (Nest).",
   directive: "overrides preset — (optional) a custom standing directive",
+  voice_confirm_entities:
+    "Require = always ask out loud before acting on this entity. Exempt = never ask for it, even for a normally sensitive action (unlock, garage, disarm).",
+  biometric_entities:
+    "Optional: point a wellbeing kind at a specific entity when auto-discovery picks the wrong one. Context only — never medical.",
   bedroom_areas: "Bedroom areas drive sleep detection during quiet hours.",
   broadcast_group: "The broadcast group is the media_player JARVIS announces through.",
   observer_quiet_start: QUIET_HELP,
@@ -380,47 +384,37 @@ export function isHidden(field: ConfigField): boolean {
   return HIDDEN_KEYS.has(field.key);
 }
 
-// ── "Not yet ported" notes per category (spec §7) ───────────────────────────
-export interface NotPorted {
+// ── "Elsewhere in the panel": old Settings cards that now live in another
+//    view (settings-tools.md §7). Everything else the old tab had is a field
+//    editor or a tool card (./tools). Rendered at the end of the category
+//    with a link that navigates to `view` / `path`. ─────────────────────────
+export interface Elsewhere {
+  /** English t() key: the old card's name */
   name: string;
+  /** English t() key: what the other view offers */
   why: string;
+  /** VIEWS key to navigate to */
+  view: string;
+  /** optional sub path inside that view */
+  path?: string;
 }
-export const NOT_PORTED: Record<string, NotPorted[]> = {
+export const ELSEWHERE: Record<string, Elsewhere[]> = {
   core: [
-    { name: "AI Models", why: "live provider/model dropdowns need jarvis/list_models per role" },
-    { name: "Operational Mode", why: "runtime state, now on the Overview view; area-chip picker" },
-    { name: "System Diagnostics", why: "read-only runtime health, on the Logs view" },
-  ],
-  voice: [
-    { name: "Briefings", why: "\"Brief me now\" is a service call with a speaker precondition" },
-    { name: "Satellite → Speaker", why: "per-satellite select editing one dict" },
-    { name: "Announcement Speakers", why: "per-device toggle list over one array" },
-    { name: "Voice Confirmation", why: "\"Test satellite audio\" probe" },
+    { name: "Operational Mode", why: "one chip per mode and the follow-occupancy switch", view: "overview" },
+    { name: "System Diagnostics", why: "runtime health, judgment calibration and the cognitive core", view: "logs" },
+    { name: "Wellbeing Context", why: "discovered wearables and the household's wellbeing context", view: "people" },
   ],
   learning: [
-    { name: "Document Library", why: "upload/ingest/search and the semantic-search probe" },
-    { name: "Excluded Entities", why: "chip pickers over plain lists" },
-    { name: "Routine Learning", why: "chip pickers over plain lists" },
-    { name: "Observer Tuning", why: "read-only runtime stats" },
-  ],
-  safety: [
-    { name: "Energy Management", why: "live draw, advice and agency chips" },
-    { name: "Hazard Monitor", why: "\"Scan now\" live external scan" },
-    { name: "Muted Announcements", why: "separate mute store" },
-    { name: "Sentinel Rules", why: "per-rule on/off rows over one list" },
-    { name: "Appliances", why: "structured row editor over one JSON key" },
+    { name: "Document Library", why: "upload, ingest, delete and the semantic-search probe", view: "documents" },
+    { name: "Observer Tuning", why: "read-only runtime stats", view: "logs" },
   ],
   cameras: [
-    { name: "Cameras", why: "enable/disable, rename and indoor/outdoor use two non-config commands" },
-    { name: "Doorbell Training", why: "dataset viewer plus a service call" },
-    { name: "Diagnostics", why: "service-call buttons, not settings" },
+    { name: "Cameras", why: "enable / disable, rename, indoor / outdoor, Camera Watch and camera diagnostics", view: "cameras" },
+    { name: "Doorbell Training", why: "the training dataset and the backlog run", view: "cameras" },
+    { name: "Face recognition", why: "household faces and their reference photos", view: "people" },
   ],
   home: [
-    { name: "Wellbeing Context", why: "discovered wearables are runtime data" },
-    { name: "Floor Plan Editor", why: "own Phase 3 spec (pointer-events editor)" },
-  ],
-  governance: [
-    { name: "Governance", why: "enforcement kill-switches live in their own store with their own confirm rules" },
+    { name: "Floor Plan Editor", why: "rooms, openings, doors, cameras & pins and plan import", view: "residence", path: "editor" },
   ],
 };
 

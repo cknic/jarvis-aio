@@ -15,8 +15,10 @@ CONFIG_APPLY = (COMP / "config_apply.py").read_text()
 SERVICES = (COMP / "services.yaml").read_text()
 # The Lit panel (fork Phase 2) renders Settings from the config_apply
 # catalogue; the "Brief me now" button is deferred and listed as not ported.
-SETTINGS_PRESENTATION = (ROOT / "frontend" / "src" / "views" / "settings"
-                         / "presentation.ts").read_text(encoding="utf-8")
+BRIEFING_TOOL = (ROOT / "frontend" / "src" / "views" / "settings" / "tools"
+                 / "runtime-briefing.ts").read_text(encoding="utf-8")
+SETTINGS_TOOLS = (ROOT / "frontend" / "src" / "views" / "settings" / "tools"
+                  / "runtime.ts").read_text(encoding="utf-8")
 EXAMPLE_DASHBOARD = (ROOT / "examples" / "jarvis-dashboard.yaml").read_text()
 
 
@@ -80,13 +82,15 @@ def test_panel_briefing_toggles_are_wired():
 
 
 def test_manual_trigger_still_reachable():
-    # The old panel's "BRIEF ME NOW" button is deferred to Phase 3 (listed as
-    # not yet ported in the Settings view); the trigger itself stays available
-    # as the jarvis.briefing service and as a button on the example dashboard.
+    # The old panel's "BRIEF ME NOW" button is the Settings › General
+    # "Briefings" tool card again (Phase 3, settings-tools.md §4.16); it calls
+    # the jarvis.briefing service, which the example dashboard's button uses too.
     assert re.search(r"^briefing:", SERVICES, re.M), "jarvis.briefing service missing"
     assert "jarvis.briefing" in EXAMPLE_DASHBOARD
-    assert re.search(r'name:\s*"Briefings"', SETTINGS_PRESENTATION), \
-        "Settings view should list Briefings under 'Not yet ported'"
+    assert re.search(r'callService\(\s*"jarvis",\s*"briefing"', BRIEFING_TOOL), \
+        "the Briefings tool card must call the jarvis.briefing service"
+    assert re.search(r'id:\s*"briefing"[^}]*element:\s*"jarvis-tool-briefing"', SETTINGS_TOOLS, re.S), \
+        "the Briefings tool card must be registered in Settings › General"
 
 
 # ── v6.78.1 regression guards ────────────────────────────────────────────────

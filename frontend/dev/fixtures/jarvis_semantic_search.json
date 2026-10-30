@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "ollama_configured": true,
+  "vector_count": 57,
+  "base": "http://homeassistant.local:11434",
+  "model": "nomic-embed-text",
+  "ok": true,
+  "dim": 768
+}

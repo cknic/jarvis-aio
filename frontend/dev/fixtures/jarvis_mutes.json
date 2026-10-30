@@ -1,0 +1,5 @@
+{
+  "entities": ["binary_sensor.back_door", "light.hallway_strip"],
+  "categories": ["appliances"],
+  "all": false
+}

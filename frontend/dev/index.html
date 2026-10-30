@@ -23,12 +23,17 @@
       .toolbar button[aria-pressed="true"] { outline: 2px solid var(--primary-color); }
       .stage { flex: 1 1 auto; display: flex; min-height: 0; }
       #mount { flex: 1 1 auto; min-width: 0; display: flex; }
-      #mount jarvis-panel { flex: 1 1 auto; height: 100%; }
-      /* narrow: a 390 x 760 phone frame */
+      #frame { flex: 1 1 auto; min-width: 0; display: flex; }
+      #frame jarvis-panel { flex: 1 1 auto; height: 100%; }
+      /* narrow: a 390 x 760 phone frame. The transform makes the frame (not
+         the scrolling panel) the containing block of the panel's fixed
+         layers - the More sheet and its scrim - so they stay inside the
+         phone like they stay inside the viewport in Home Assistant. */
       body[data-narrow] #mount { justify-content: center; align-items: center; background: var(--secondary-background-color); }
-      body[data-narrow] #mount jarvis-panel {
+      body[data-narrow] #frame {
         flex: none; width: 390px; height: min(760px, 100%);
         border: 1px solid var(--divider-color); border-radius: 24px; overflow: hidden;
+        transform: translateZ(0);
       }
       #log {
         flex: 0 0 300px; max-width: 40vw; margin: 0; padding: 8px 12px; overflow: auto;
@@ -57,7 +62,7 @@
       <span id="url" aria-live="polite"></span>
     </div>
     <div class="stage">
-      <div id="mount"></div>
+      <div id="mount"><div id="frame"></div></div>
       <pre id="log" aria-live="polite"></pre>
     </div>
 
@@ -102,7 +107,7 @@
       panel.narrow = narrow;
       panel.hass = hass;
       document.body.toggleAttribute("data-narrow", narrow);
-      document.getElementById("mount").appendChild(panel);
+      document.getElementById("frame").appendChild(panel);
 
       // HA re-sets `hass` on every state change; emulate a slow heartbeat.
       setInterval(() => { panel.hass = { ...hass }; }, 5000);

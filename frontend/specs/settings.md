@@ -467,6 +467,11 @@ visual grouping without hand-written sub-sections. The count in the rail/subhead
 Below the fields, a second `jv-section` "Not yet ported" lists the §7 rows mapped to this category, one line
 each: `{Card name} — {why} — Phase 3`, in `.jv-muted`.
 
+> **Phase 3 update.** The tools listed in §7 now exist (settings-tools.md; their own views for the floor
+> plan, cameras, people and documents), so `NOT_PORTED` is gone. `presentation.ts` `ELSEWHERE` lists the old
+> cards that live in another view, rendered as "Elsewhere in the panel" with one link per line
+> (`{Card name}` as a button that navigates there, then `— {why}`).
+
 ### 4.2 Search
 
 Toolbar search filters across **all** categories (case-insensitive substring on key, display label, help

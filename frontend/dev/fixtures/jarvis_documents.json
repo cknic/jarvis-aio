@@ -1,0 +1,48 @@
+{
+  "chroma": false,
+  "fts": true,
+  "directory": "/config/jarvis/documents",
+  "chunk_count": 57,
+  "sources": [
+    { "source": "wifi-setup.md", "chunks": 3 },
+    { "source": "furnace-manual.pdf", "chunks": 31 },
+    { "source": "house notes.txt", "chunks": 5 },
+    { "source": "dishwasher-receipt-2024.pdf", "chunks": 2 },
+    { "source": "solar-inverter-datasheet.pdf", "chunks": 16 }
+  ],
+  "results": [
+    {
+      "text": "FILTER REPLACEMENT\n\nThe furnace uses a 16 x 25 x 1 inch pleated filter (MERV 8 or higher recommended). Inspect the filter monthly during the heating season and replace it at least every 90 days, or sooner in homes with pets. A clogged filter restricts airflow, raises the supply-air temperature and can trip the high-limit switch, which shuts the burner off until the blower has cooled the heat exchanger.",
+      "source": "furnace-manual.pdf",
+      "chunk": 7,
+      "score": 0.874,
+      "engine": "semantic"
+    },
+    {
+      "text": "Maintenance checklist (annual): clean the flame sensor with fine emery cloth, check the condensate trap and drain line for blockages, verify the inducer motor runs freely, inspect the burner flames (steady blue, no yellow tips), and confirm the filter rack door seals when closed.",
+      "source": "furnace-manual.pdf",
+      "chunk": 12,
+      "score": 0.612,
+      "engine": "semantic"
+    },
+    {
+      "text": "House notes — HVAC: filters are in the hall closet, top shelf. Last changed the furnace filter in September; the humidifier pad was swapped at the same time. Thermostat schedule: 20 °C days, 18 °C nights, 17 °C when nobody is home.",
+      "source": "house notes.txt",
+      "chunk": "2",
+      "score": 0.448,
+      "engine": "semantic"
+    }
+  ],
+  "ok": true,
+  "filename": "wifi-setup.md",
+  "chunks": 3,
+  "files_seen": 5,
+  "files_ingested": 5,
+  "total_chunks": 57,
+  "semantic": true,
+  "embedded_files": 5,
+  "embedded_chunks": 57,
+  "watched": 1,
+  "new_files": 0,
+  "files": []
+}

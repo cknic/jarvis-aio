@@ -7,11 +7,15 @@
  * and writes each change through `jarvis/update_config {key, value}` with
  * per-row saving / saved / failed feedback. The view knows no setting key by
  * hand; the only per-key knowledge is the presentation maps in
- * ./settings/presentation.ts. Deep links: /jarvis/settings/<category>[/<key>].
+ * ./settings/presentation.ts and whatever plug-ins register in
+ * ./settings/registry.ts (field editors per key, tool cards per category;
+ * see ./settings/README.md). Deep links: /jarvis/settings/<category>[/<key>]
+ * and /jarvis/settings/<category>/tool:<id>.
  */
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { live } from "lit/directives/live.js";
+import { html as staticHtml, unsafeStatic } from "lit/static-html.js";
 import { JarvisView } from "./view-base";
 import { base } from "../theme/base";
 import { t, loadLanguage, resolveLanguage } from "../i18n";
@@ -24,14 +28,25 @@ import "./settings/field";
 import type { JarvisConfigField, FieldStatus, FieldChangeDetail } from "./settings/field";
 import { coerceForSave, matchesQuery, optionValue } from "./settings/coerce";
 import {
-  CATEGORY_NAMES, DEFAULT_CATEGORIES, LABEL_OVERRIDE, APPLIANCE_RELOAD_KEYS, CONFIRM_ON_ENABLE, NOT_PORTED,
-  PLACEHOLDER, helpFor, enumLabel, suggestionsFor, hasSuggestionSource, pairingHint, isHidden,
+  CATEGORY_NAMES, DEFAULT_CATEGORIES, LABEL_OVERRIDE, APPLIANCE_RELOAD_KEYS, CONFIRM_ON_ENABLE, ELSEWHERE,
+  PLACEHOLDER, helpFor, enumLabel, suggestionsFor, hasSuggestionSource, pairingHint, isHidden, type Elsewhere,
 } from "./settings/presentation";
+import {
+  findFieldEditor, consumedKeys, toolCardsFor, toolCardMatches,
+  type SettingsHost, type SaveResult, type ToolCard,
+} from "./settings/registry";
+// ── plug-ins: one import line per editor / tool-card module (they register
+//    themselves on import; see ./settings/README.md). The built-in picker
+//    editor lives in registry.ts itself. ──
+import "./settings/tools";
 
 const REFETCH_DEBOUNCE_MS = 300;
 const SAVED_CLEAR_MS = 2000;
 const WARN_CLEAR_MS = 6000;
 const FLASH_MS = 1600;
+
+/** Quote a value for an attribute selector (jsdom has no CSS.escape). */
+const attrEsc = (s: string) => s.replace(/["\\]/g, "\\$&");
 
 @customElement("jarvis-view-settings")
 export class JarvisViewSettings extends JarvisView {
@@ -45,11 +60,34 @@ export class JarvisViewSettings extends JarvisView {
   @state() private _flashKey = "";
 
   private _inflight = new Set<string>();
-  private _queued = new Map<string, unknown>();
+  private _queued = new Map<string, { value: unknown; waiters: Array<(r: SaveResult) => void> }>();
   private _refetchTimer: ReturnType<typeof setTimeout> | undefined;
   private _statusTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private _flashTimer: ReturnType<typeof setTimeout> | undefined;
   private _lastDeepLink = "";
+
+  /** What field editors (ctx.host) and tool cards (.host) write through (./settings/registry.ts). */
+  private readonly _host: SettingsHost = {
+    value: (key) => {
+      const f = this._field(key);
+      return f ? this._value(f) : undefined;
+    },
+    field: (key) => this._field(key),
+    save: (key, value) => {
+      const f = this._field(key);
+      return this._change(key, f ? coerceForSave(f, value) : value);
+    },
+    saveMany: async (entries) => {
+      for (const [key, value] of entries) {
+        const r = await this._host.save(key, value);
+        if (!r.ok) return r;
+      }
+      return { ok: true };
+    },
+    refetch: () => this._scheduleRefetch(),
+    refreshSnapshot: () => this.refresh(),
+    toast: (message) => this._toast(message),
+  };
 
   static override styles = [
     base,
@@ -211,6 +249,17 @@ export class JarvisViewSettings extends JarvisView {
         color: var(--jv-text-2);
         overflow-wrap: anywhere;
       }
+      .port-link {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        font-weight: var(--jv-font-weight-medium);
+        color: var(--jv-accent-text);
+        text-decoration: underline;
+        cursor: pointer;
+      }
       details summary {
         cursor: pointer;
         min-height: var(--jv-tap);
@@ -322,9 +371,9 @@ export class JarvisViewSettings extends JarvisView {
     return t(LABEL_OVERRIDE[f.key] ?? f.label ?? f.key);
   }
 
-  private async _change(key: string, value: unknown, row?: JarvisConfigField | null): Promise<void> {
+  private async _change(key: string, value: unknown, row?: JarvisConfigField | null): Promise<SaveResult> {
     const field = this._field(key);
-    if (!field) return;
+    if (!field) return { ok: false, error: new WsError("jarvis/update_config", "invalid_key", `${key} is not in the catalogue`) };
     if (field.kind === "bool" && value === true && CONFIRM_ON_ENABLE[key]) {
       const ok = await confirmDialog({
         heading: this._labelFor(field),
@@ -334,7 +383,7 @@ export class JarvisViewSettings extends JarvisView {
       });
       if (!ok) {
         row?.requestUpdate();
-        return;
+        return { ok: false };
       }
     }
     if (key === "ui_language") {
@@ -345,18 +394,25 @@ export class JarvisViewSettings extends JarvisView {
         /* a missing dictionary is not a reason to refuse the save */
       }
     }
-    await this._save(key, value);
+    return this._save(key, value);
   }
 
-  private async _save(key: string, value: unknown): Promise<void> {
+  private async _save(key: string, value: unknown): Promise<SaveResult> {
     const field = this._field(key);
-    if (!field) return;
+    if (!field) return { ok: false };
     if (this._inflight.has(key)) {
-      this._queued.set(key, value);
-      return;
+      // a second write to the same key waits for the first; only the latest value is sent
+      return new Promise<SaveResult>((resolve) => {
+        const q = this._queued.get(key);
+        if (q) {
+          q.value = value;
+          q.waiters.push(resolve);
+        } else this._queued.set(key, { value, waiters: [resolve] });
+      });
     }
     this._inflight.add(key);
     this._setStatus(key, { level: "saving", message: t("Saving…") });
+    let result: SaveResult = { ok: true };
     try {
       await this.ws("jarvis/update_config", { key, value });
       if (this._schema) this._schema = { ...this._schema, values: { ...this._schema.values, [key]: value } };
@@ -381,14 +437,16 @@ export class JarvisViewSettings extends JarvisView {
       const message = t("Save failed — {message}", { message: e.message });
       this._setStatus(key, { level: "error", message });
       this._toast(message);
+      result = { ok: false, error: e };
     } finally {
       this._inflight.delete(key);
-      if (this._queued.has(key)) {
-        const next = this._queued.get(key);
+      const q = this._queued.get(key);
+      if (q) {
         this._queued.delete(key);
-        void this._save(key, next);
+        void this._save(key, q.value).then((r) => q.waiters.forEach((w) => w(r)));
       }
     }
+    return result;
   }
 
   private _onFieldChange(e: CustomEvent<FieldChangeDetail>): void {
@@ -418,14 +476,19 @@ export class JarvisViewSettings extends JarvisView {
   }
 
   private async _handleDeepLink(): Promise<void> {
-    const [cat, key] = this.subPath.split("/");
-    if (!key || !this._schema) return;
-    const id = `${cat}/${key}`;
+    const [cat, sub] = this.subPath.split("/");
+    if (!sub || !this._schema) return;
+    const id = `${cat}/${sub}`;
     if (id === this._lastDeepLink) return;
     this._lastDeepLink = id;
     this._query = "";
     await this.updateComplete;
-    const el = this.renderRoot.querySelector<HTMLElement>(`jarvis-config-field[data-key="${key}"]`);
+    // /settings/<cat>/tool:<id> targets a tool card; a consumed key targets its owner's row
+    const toolId = sub.startsWith("tool:") ? sub.slice(5) : "";
+    const key = toolId ? sub : this._consumed.get(sub) ?? sub;
+    const el = toolId
+      ? this.renderRoot.querySelector<HTMLElement>(`[data-tool-id="${attrEsc(toolId)}"]`)
+      : this.renderRoot.querySelector<HTMLElement>(`jarvis-config-field[data-key="${attrEsc(key)}"]`);
     if (!el) return;
     // Chromium does not suppress a programmatic smooth scroll under
     // prefers-reduced-motion, so choose the behaviour here (DESIGN.md §5).
@@ -444,15 +507,48 @@ export class JarvisViewSettings extends JarvisView {
   }
 
   // ── field selection ───────────────────────────────────────────────────
+  /** consumed key -> owner key, for the current catalogue (registry editors with `consumes`). */
+  private get _consumed(): Map<string, string> {
+    return this._schema ? consumedKeys(this._schema.fields) : new Map();
+  }
+
+  private _matches(f: ConfigField, q: string): boolean {
+    const optionLabels = (f.options ?? []).map((o) => t(enumLabel(f.key, optionValue(o))));
+    return matchesQuery(q, f.key, this._labelFor(f), t(helpFor(f.key)), optionLabels);
+  }
+
+  /**
+   * The rows of a category: hidden keys only when searched for, consumed keys
+   * never (a search hit on a consumed key shows its owner's row instead).
+   */
   private _fieldsIn(category: string, query = ""): ConfigField[] {
     if (!this._schema) return [];
     const q = query.trim();
-    return this._schema.fields.filter((f) => {
-      if (f.category !== category) return false;
-      if (!q) return !isHidden(f);
-      const optionLabels = (f.options ?? []).map((o) => t(enumLabel(f.key, optionValue(o))));
-      return matchesQuery(q, f.key, this._labelFor(f), t(helpFor(f.key)), optionLabels);
-    });
+    const consumed = this._consumed;
+    const byKey = new Map(this._schema.fields.map((f) => [f.key, f]));
+    const out: ConfigField[] = [];
+    const seen = new Set<string>();
+    for (const f of this._schema.fields) {
+      if (f.category !== category) continue;
+      const owner = consumed.get(f.key);
+      if (!q) {
+        if (owner || isHidden(f)) continue;
+        out.push(f);
+        continue;
+      }
+      if (!this._matches(f, q)) continue;
+      const target = owner ? byKey.get(owner) : f;
+      if (!target || seen.has(target.key)) continue;
+      seen.add(target.key);
+      out.push(target);
+    }
+    return out;
+  }
+
+  private _toolsIn(category: string, query = ""): ToolCard[] {
+    const cards = toolCardsFor(category);
+    const q = query.trim();
+    return q ? cards.filter((c) => toolCardMatches(c, q, t)) : cards;
   }
 
   private _value(f: ConfigField): unknown {
@@ -562,15 +658,16 @@ export class JarvisViewSettings extends JarvisView {
     if (this._query.trim()) return this._renderSearchResults();
     const cat = this._activeCategory;
     const fields = this._fieldsIn(cat);
-    const ports = NOT_PORTED[cat] ?? [];
+    const elsewhere = ELSEWHERE[cat] ?? [];
     return html`
       <div class="stack">
+        ${this._renderToolCards(this._toolsIn(cat))}
         <jv-section .heading=${t(CATEGORY_NAMES[cat] ?? cat)} .subheading=${t("{count} settings", { count: fields.length })}>
           ${fields.length
             ? this._renderFields(fields)
             : html`<jv-empty compact icon="mdi:cog-off-outline" .message=${t("No settings in this section.")}></jv-empty>`}
         </jv-section>
-        ${ports.length ? this._renderNotPorted(ports) : nothing}
+        ${elsewhere.length ? this._renderElsewhere(elsewhere) : nothing}
       </div>
     `;
   }
@@ -588,11 +685,28 @@ export class JarvisViewSettings extends JarvisView {
     `;
   }
 
+  /** Tool cards (registry) for one category: <tag data-tool-id .hass .data .narrow .host .active ?flash>. */
+  private _renderToolCards(cards: ToolCard[]) {
+    if (!cards.length) return nothing;
+    return cards.map((card) => {
+      const tag = unsafeStatic(card.element);
+      return staticHtml`<${tag}
+        data-tool-id=${card.id}
+        .hass=${this.hass}
+        .data=${this.data}
+        .narrow=${this.narrow}
+        .host=${this._host}
+        .active=${true}
+        ?flash=${this._flashKey === `tool:${card.id}`}
+      ></${tag}>`;
+    });
+  }
+
   private _renderSearchResults() {
     const q = this._query;
     const groups = this._categories
-      .map((c) => ({ c, fields: this._fieldsIn(c, q) }))
-      .filter((g) => g.fields.length > 0);
+      .map((c) => ({ c, fields: this._fieldsIn(c, q), tools: this._toolsIn(c, q) }))
+      .filter((g) => g.fields.length > 0 || g.tools.length > 0);
     if (!groups.length) {
       return html`
         <jv-section>
@@ -606,9 +720,14 @@ export class JarvisViewSettings extends JarvisView {
       <div class="stack">
         ${groups.map(
           (g) => html`
-            <jv-section .heading=${t(CATEGORY_NAMES[g.c] ?? g.c)} .subheading=${t("{count} matches", { count: g.fields.length })}>
-              ${this._renderFields(g.fields)}
-            </jv-section>
+            ${this._renderToolCards(g.tools)}
+            ${g.fields.length
+              ? html`
+                  <jv-section .heading=${t(CATEGORY_NAMES[g.c] ?? g.c)} .subheading=${t("{count} matches", { count: g.fields.length + g.tools.length })}>
+                    ${this._renderFields(g.fields)}
+                  </jv-section>
+                `
+              : nothing}
           `,
         )}
       </div>
@@ -624,10 +743,14 @@ export class JarvisViewSettings extends JarvisView {
           const prefix = f.key.split("_")[0];
           const divider = i > 0 && prefix !== prevPrefix;
           prevPrefix = prefix;
-          const help = helpFor(f.key);
-          const pairing = f.key === "satellite_pairings" ? pairingHint(this.data) : null;
+          const editor = findFieldEditor(f);
+          // an editor's row also carries the help and the status of the keys it consumes
+          const consumes = editor?.consumes.filter((k) => k !== f.key && !!this._field(k)) ?? [];
+          const help = [helpFor(f.key), ...consumes.map((k) => helpFor(k))].filter(Boolean).map((h) => t(h)).join("\n");
+          const statuses = consumes.map((k) => this._status.get(k)).filter((s): s is FieldStatus => !!s);
+          const pairing = f.key === "satellite_pairings" && !editor ? pairingHint(this.data) : null;
           const hint = pairing ? t("Keys: {satellites}; values: {speakers}", pairing) : "";
-          const suggest = hasSuggestionSource(f.key) ? () => suggestionsFor(f.key, this.data, this.hass) : undefined;
+          const suggest = !editor && hasSuggestionSource(f.key) ? () => suggestionsFor(f.key, this.data, this.hass) : undefined;
           return html`
             ${divider ? html`<hr class="jv-divider" />` : nothing}
             <jarvis-config-field
@@ -635,10 +758,14 @@ export class JarvisViewSettings extends JarvisView {
               .field=${f}
               .value=${this._value(f)}
               .label=${this._labelFor(f)}
-              .help=${help ? t(help) : ""}
+              .help=${help}
               .hint=${hint}
               .placeholder=${PLACEHOLDER[f.key] ?? ""}
               .suggest=${suggest}
+              .hass=${this.hass}
+              .data=${this.data}
+              .host=${this._host}
+              .statuses=${statuses}
               .status=${this._status.get(f.key) ?? null}
               .showKey=${!this.narrow || this._showKeys}
               .narrow=${this.narrow}
@@ -653,17 +780,24 @@ export class JarvisViewSettings extends JarvisView {
     `;
   }
 
-  private _renderNotPorted(rows: Array<{ name: string; why: string }>) {
+  /** Old Settings cards that moved to another view, each with a link there. */
+  private _renderElsewhere(rows: Elsewhere[]) {
     const list = html`
       <ul class="ports">
-        ${rows.map((r) => html`<li>${t(r.name)} — ${t(r.why)} — ${t("Phase 3")}</li>`)}
+        ${rows.map(
+          (r) => html`<li>
+            <button type="button" class="port-link jv-hit" @click=${() => this.navigate(r.view, r.path)}>${t(r.name)}</button>
+            — ${t(r.why)}
+          </li>`,
+        )}
       </ul>
     `;
-    const heading = t("Not yet ported");
+    const heading = t("Elsewhere in the panel");
     return this.narrow
       ? html`<jv-section><details><summary>${heading}</summary>${list}</details></jv-section>`
-      : html`<jv-section .heading=${heading} icon="mdi:progress-wrench">${list}</jv-section>`;
+      : html`<jv-section .heading=${heading} icon="mdi:arrow-top-right">${list}</jv-section>`;
   }
+
 }
 
 declare global {

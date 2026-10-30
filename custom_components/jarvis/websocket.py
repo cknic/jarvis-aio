@@ -2295,14 +2295,12 @@ async def ws_biometrics(
         if msg["action"] in ("enable", "disable") and _deny_non_admin(connection, msg):
             return
         if msg["action"] == "enable":
-            await hass.async_add_executor_job(
-                jarvis_config.set, "biometrics_enabled", True
-            )
+            await config_apply.async_apply_many(
+                hass, _get_entry(hass), {"biometrics_enabled": True})
             jarvis_log("BIO", "biometric context enabled")
         elif msg["action"] == "disable":
-            await hass.async_add_executor_job(
-                jarvis_config.set, "biometrics_enabled", False
-            )
+            await config_apply.async_apply_many(
+                hass, _get_entry(hass), {"biometrics_enabled": False})
             jarvis_log("BIO", "biometric context disabled")
         enabled = bool(jarvis_config.get("biometrics_enabled", False))
         states = (hass.states.async_all("sensor")
@@ -2339,7 +2337,7 @@ async def ws_energy(
     """Energy management for the panel (v6.62.0): report the current power
     picture + advice, or set the agency level (advisory/opt_in/autonomous)."""
     try:
-        from . import energy, jarvis_config
+        from . import energy
         states = {state.entity_id: state for state in hass.states.async_all()}
         if msg["action"] == "set_agency" and _deny_non_admin(connection, msg):
             return
@@ -2350,9 +2348,8 @@ async def ws_energy(
                 connection.send_error(msg["id"], "bad_agency",
                                       f"unknown agency '{level}'")
                 return
-            await hass.async_add_executor_job(
-                jarvis_config.set, "energy_agency", level
-            )
+            await config_apply.async_apply_many(
+                hass, _get_entry(hass), {"energy_agency": level})
             jarvis_log("ENERGY", f"agency → {level}")
             res = await hass.async_add_executor_job(energy.power_status, None, states)
             connection.send_result(msg["id"], res)
@@ -2841,9 +2838,8 @@ async def ws_semantic_search(
         if action in ("enable", "disable", "test") and _deny_non_admin(connection, msg):
             return
         if action == "enable":
-            await hass.async_add_executor_job(
-                jarvis_config.set, "semantic_search", True
-            )
+            await config_apply.async_apply_many(
+                hass, _get_entry(hass), {"semantic_search": True})
             await hass.async_add_executor_job(embeddings.init_store)
             res = await embeddings.probe(hass)
             res["enabled"] = True
@@ -2856,9 +2852,8 @@ async def ws_semantic_search(
                                     f"ready: {res.get('error')}")
             connection.send_result(msg["id"], res)
         elif action == "disable":
-            await hass.async_add_executor_job(
-                jarvis_config.set, "semantic_search", False
-            )
+            await config_apply.async_apply_many(
+                hass, _get_entry(hass), {"semantic_search": False})
             jarvis_log("AGENT", "semantic search disabled — keyword (FTS) active")
             connection.send_result(msg["id"], {"enabled": False, "ok": True})
         elif action == "test":
@@ -3046,14 +3041,14 @@ async def ws_camera_location(
         if not entity_id.startswith("camera.") or not hass.states.get(entity_id):
             connection.send_error(msg["id"], "unknown_camera", entity_id)
             return
-        from . import jarvis_config, outdoor
+        from . import outdoor
         new_in, new_out = outdoor.set_entity_location(
             outdoor._cfg_list("indoor_entities"),
             outdoor._cfg_list("outdoor_entities"),
             entity_id, mode,
         )
-        await hass.async_add_executor_job(
-            jarvis_config.set_many,
+        await config_apply.async_apply_many(
+            hass, _get_entry(hass),
             {"indoor_entities": new_in, "outdoor_entities": new_out},
         )
         jarvis_log("CONFIG", f"camera {entity_id} location → {mode.upper()}"

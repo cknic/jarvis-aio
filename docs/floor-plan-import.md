@@ -5,6 +5,12 @@ uses that plan for more than decoration: `residence_graph.py` derives room
 **adjacency** from it so the intrusion investigator can follow a plausible route
 inward from a breach point instead of treating every motion zone as equivalent.
 
+The easiest way to build the plan is the panel's floor-plan editor
+(**Residence → Edit floor plan**, see [panel.md](panel.md#the-floor-plan-editor--jarvisresidenceeditortab)):
+it draws and saves this format for you, and its **Import** tab takes a
+vacuum-map entity, an image, a SweetHome3D file or a JSON plan. This page
+documents the format itself and the command-line converter.
+
 ## The format JARVIS expects
 
 `floor_plan_rooms` is a map of **floor name → rooms**, where each room has an
@@ -41,8 +47,9 @@ You do **not** need to double-escape anything. JARVIS accepts `floor_plan_rooms`
 as **either** a JSON object **or** a JSON string — `residence_graph._boxes()` and
 the panel both `json.loads()` a string and otherwise use the object as-is. The
 escaping pain only appears when you hand-edit Home Assistant's stored config,
-where the value happens to be persisted as a string. Editing the plan on the
-**Residence** tab avoids the escaping entirely.
+where the value happens to be persisted as a string. Editing the plan in the
+floor-plan editor (or the JSON field in **Settings → Home & Extras**) avoids
+the escaping entirely.
 
 ## Importing from SweetHome3D
 
@@ -79,8 +86,11 @@ python3 scripts/sweethome3d_to_floorplan.py "plan.sh3d" --rotate 180 --origin-ze
 python3 scripts/sweethome3d_to_floorplan.py "plan.sh3d" --mirror x --origin-zero
 ```
 
-Then paste the JSON onto the Residence tab (or into the `floor_plan_rooms`
-config field).
+Then load the output in the editor (**Residence → Edit floor plan → Import →
+Import JSON…**) or paste it into the `floor_plan_rooms` field under
+**Settings → Home & Extras**. The editor's Import tab can also read the
+`.sh3d` / `Home.xml` / JSON export directly, with the same scale, rotate,
+mirror and origin options as the script.
 
 ### Floors: use `1f` / `2f` / `bsmt`
 

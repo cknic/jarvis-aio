@@ -23,6 +23,19 @@ export function optionValues(field: ConfigField): string[] {
   return (field.options ?? []).map(optionValue);
 }
 
+/**
+ * HA's <ha-select> (mwc) floats its label only for a non-empty value, so an
+ * option whose value is "" (e.g. "Auto", "— none —") draws the label over the
+ * selected text. Selects hand it this stand-in instead and map it back.
+ */
+export const HA_SELECT_EMPTY = "__jv_empty__";
+export function toHaSelectValue(v: string): string {
+  return v === "" ? HA_SELECT_EMPTY : v;
+}
+export function fromHaSelectValue(v: string): string {
+  return v === HA_SELECT_EMPTY ? "" : v;
+}
+
 export function rawText(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "string") return v;
@@ -55,10 +68,16 @@ export function normalise(field: ConfigField, raw: unknown): Normalised {
       return { kind: "number", value: null, warning: "Stored value is not a number: {raw}" };
     case "enum": {
       const value = raw === null || raw === undefined ? "" : String(raw);
-      const inOptions = optionValues(field).includes(value);
-      return inOptions
-        ? { kind: "enum", value, inOptions }
-        : { kind: "enum", value, inOptions, warning: "Stored value is not an option: {raw}" };
+      const values = optionValues(field);
+      if (values.includes(value)) return { kind: "enum", value, inOptions: true };
+      if (value === "") {
+        // nothing stored (or "" when "" is not an option): show the default,
+        // else the first option, rather than a blank select - no warning
+        const def = field.default === null || field.default === undefined ? "" : String(field.default);
+        const shown = values.includes(def) ? def : values[0];
+        return shown === undefined ? { kind: "enum", value, inOptions: false } : { kind: "enum", value: shown, inOptions: true };
+      }
+      return { kind: "enum", value, inOptions: false, warning: "Stored value is not an option: {raw}" };
     }
     case "list":
       if (Array.isArray(raw)) return { kind: "list", value: raw.map((x) => rawText(x)).filter((x) => x !== "") };

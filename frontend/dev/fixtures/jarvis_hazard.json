@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "center": [37.775, -122.419],
+  "using_override": false,
+  "quake_radius_km": 300,
+  "quake_min_mag": 4.0,
+  "disaster_radius_km": 500,
+  "feeds": { "earthquakes": true, "weather": true, "disasters": false },
+  "ok": true,
+  "earthquakes": [
+    { "mag": 4.6, "place": "12 km NE of Gilroy, CA", "dist_km": 118, "time": 1761750000000, "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75000001" }
+  ],
+  "weather": [
+    { "severity": "Moderate", "event": "Wind Advisory", "area": "San Francisco Bay Shoreline", "headline": "Wind Advisory until 9 PM PDT" }
+  ],
+  "disasters": [],
+  "counts": { "earthquakes": 1, "weather": 1, "disasters": 0 }
+}

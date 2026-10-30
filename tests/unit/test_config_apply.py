@@ -275,3 +275,64 @@ async def test_ws_update_config_delegates_to_async_apply(fake_hass, monkeypatch,
     await websocket.ws_update_config(fake_hass, conn, {"id": 10, "key": "nope", "value": 1})
     assert conn.error == (10, "invalid_key", "Key 'nope' is not writable from the panel")
     assert len(seen) == 1
+
+
+# ── async_apply_many (purpose-built handlers) ────────────────────────────────
+
+async def test_async_apply_many_writes_runtime_config_persists_and_validates(fake_hass, monkeypatch, load):
+    """Feature toggles written by jarvis/biometrics, jarvis/semantic_search and
+    jarvis/camera_location used to land in config.json only, so the boot-time
+    runtime_config copy kept the old value and Settings showed it until a
+    restart. async_apply_many writes both."""
+    _load_websocket_module()
+    ca = load("config_apply")
+    entry = types.SimpleNamespace(entry_id="m", data={}, options={})
+    fake_hass.data = {ca.DOMAIN: {entry.entry_id: {"runtime_config": {"semantic_search": True}}}}
+    persisted = []
+    _install_jc_module(monkeypatch, "jarvis_config", types.SimpleNamespace(
+        set_many=lambda updates: persisted.append(dict(updates))))
+
+    res = await ca.async_apply_many(fake_hass, entry, {"semantic_search": False, "biometrics_enabled": True})
+    assert res == {"semantic_search": False, "biometrics_enabled": True}
+    assert fake_hass.data[ca.DOMAIN][entry.entry_id]["runtime_config"] == {
+        "semantic_search": False, "biometrics_enabled": True}
+    assert persisted == [{"semantic_search": False, "biometrics_enabled": True}]
+
+    with pytest.raises(ValueError):
+        await ca.async_apply_many(fake_hass, entry, {"semantic_search": True, "nope": 1})
+    assert len(persisted) == 1  # nothing written when any key is invalid
+
+    # no entry: still persists (old behaviour), no runtime_config to mirror
+    await ca.async_apply_many(fake_hass, None, {"biometrics_enabled": False})
+    assert persisted[-1] == {"biometrics_enabled": False}
+
+
+async def test_ws_semantic_search_disable_mirrors_runtime_config(fake_hass, monkeypatch, load):
+    websocket = _load_websocket_module()
+    ca = load("config_apply")
+    entry = types.SimpleNamespace(entry_id="ss", data={}, options={})
+    fake_hass.config_entries.async_entries = lambda domain: [entry]
+    fake_hass.data = {websocket.DOMAIN: {entry.entry_id: {"runtime_config": {"semantic_search": True}}}}
+    seen = []
+
+    async def _fake_many(hass, entry_, updates):
+        seen.append((entry_, dict(updates)))
+        hass.data[websocket.DOMAIN][entry_.entry_id]["runtime_config"].update(updates)
+        return dict(updates)
+    monkeypatch.setattr(ca, "async_apply_many", _fake_many)
+    monkeypatch.setattr(websocket, "_is_admin", lambda conn: True)
+    monkeypatch.setattr(websocket, "jarvis_log", lambda *a: None)
+
+    class _Conn:
+        result = error = None
+
+        def send_result(self, msg_id, payload):
+            self.result = (msg_id, payload)
+
+        def send_error(self, msg_id, code, message):
+            self.error = (msg_id, code, message)
+    conn = _Conn()
+    await websocket.ws_semantic_search(fake_hass, conn, {"id": 3, "action": "disable"})
+    assert conn.error is None and conn.result == (3, {"enabled": False, "ok": True})
+    assert seen == [(entry, {"semantic_search": False})]
+    assert fake_hass.data[websocket.DOMAIN]["ss"]["runtime_config"]["semantic_search"] is False

@@ -1,0 +1,22 @@
+{
+  "results": [
+    {
+      "text": "We bought the new dishwasher in March 2024 from the appliance store on Main Street — the Bosch 300 series. The receipt is in the documents folder.",
+      "role": "user",
+      "timestamp": "2026-10-12T19:42:08.231904",
+      "score": 0.781
+    },
+    {
+      "text": "Noted. The Bosch 300 series has a two-year manufacturer warranty, so it is covered until March 2026. I will remind you a month before it ends.",
+      "role": "assistant",
+      "timestamp": "2026-10-12T19:42:15.904112",
+      "score": 0.654
+    },
+    {
+      "text": "Can you remember that the dishwasher rinse aid is kept under the sink, left side?",
+      "role": "user",
+      "timestamp": "2026-09-30T08:05:51.117730",
+      "score": 0.312
+    }
+  ]
+}

@@ -9,12 +9,20 @@
  *   "field-change" {key, value}   value already in the kind's JS type
  *   "field-reset"  {key}          "Reset to default" pressed
  * and shows whatever `status` the owner passes back (saving / saved / error / warn).
+ *
+ * Before the kind switch the row asks the plug-in registry (./registry.ts)
+ * for a field editor; when one matches, its template replaces the control
+ * (label, key, help, hint, default / reset and the status slot stay). The
+ * editor's `onChange` goes through the same "field-change" event, so the
+ * owner's save pipeline is unchanged; `statuses` carries the status of keys
+ * the editor consumes besides `status` (owner first), joined in the slot.
  */
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { live } from "lit/directives/live.js";
 import { html as staticHtml, literal } from "lit/static-html.js";
-import type { ConfigField, FieldOption } from "../../types";
+import type { ConfigField, FieldOption, Hass, PanelData } from "../../types";
+import { findFieldEditor, type FieldEditorContext, type SettingsHost } from "./registry";
 import { base } from "../../theme/base";
 import { t } from "../../i18n";
 import { haDefined, watchDefinitions } from "../../ha";
@@ -22,6 +30,7 @@ import "../../components";
 import {
   normalise, optionLabel, optionValue, parseListText, listToText, clampNumber,
   coerceForSave, valueEquals, formatValue, prettyJson, rawText, jsonShapeError,
+  toHaSelectValue, fromHaSelectValue,
 } from "./coerce";
 import { enumLabel, type Suggestion } from "./presentation";
 
@@ -48,6 +57,12 @@ export class JarvisConfigField extends LitElement {
   @property({ type: String }) placeholder = "";
   @property({ attribute: false }) suggest?: () => Suggestion[];
   @property({ attribute: false }) status: FieldStatus | null = null;
+  /** statuses of keys a field editor consumes besides the owner (shown joined with " · ") */
+  @property({ attribute: false }) statuses: FieldStatus[] = [];
+  /** for field editors (./registry.ts): live HA, the snapshot and the write host */
+  @property({ attribute: false }) hass?: Hass;
+  @property({ attribute: false }) data: PanelData | null = null;
+  @property({ attribute: false }) host?: SettingsHost;
   @property({ type: Boolean, reflect: true }) disabled = false;
   @property({ type: Boolean, attribute: "show-key" }) showKey = true;
   @property({ type: Boolean, reflect: true }) narrow = false;
@@ -58,6 +73,8 @@ export class JarvisConfigField extends LitElement {
   @state() private _jsonError = "";
   @state() private _note: FieldStatus | null = null;
   @state() private _suggestions: Suggestion[] | null = null;
+  /** an editor's last emitted value, shown until the owner's value changes or the save fails */
+  @state() private _optimistic: { value: unknown } | null = null;
 
   static override styles = [
     base,
@@ -233,8 +250,21 @@ export class JarvisConfigField extends LitElement {
     watchDefinitions(this, HA_TAGS);
   }
 
+  override updated(changed: Map<PropertyKey, unknown>): void {
+    // mwc's <ha-select> does not re-run its label / selected-text layout when
+    // the value or its items change underneath it; nudge it once they settle.
+    if (this.field?.kind !== "enum" || !(changed.has("value") || changed.has("field"))) return;
+    type MwcSelect = HTMLElement & { updateComplete?: Promise<unknown>; layout?: () => unknown; layoutOptions?: () => unknown };
+    const sel = this.renderRoot.querySelector("ha-select") as MwcSelect | null;
+    if (!sel || (typeof sel.layout !== "function" && typeof sel.layoutOptions !== "function")) return;
+    // layout() = layoutOptions() (re-pick the item for .value) + label float / notch
+    void Promise.resolve(sel.updateComplete).then(() => (typeof sel.layout === "function" ? sel.layout() : sel.layoutOptions?.())).catch(() => undefined);
+  }
+
   override willUpdate(changed: Map<PropertyKey, unknown>): void {
     if (!this.field) return;
+    if (changed.has("value") || changed.has("field")) this._optimistic = null;
+    if (changed.has("status") && this.status?.level === "error") this._optimistic = null;
     if (changed.has("value") || changed.has("field")) {
       const kind = this.field.kind;
       if (kind === "list") {
@@ -305,7 +335,7 @@ export class JarvisConfigField extends LitElement {
   // ── enum ──────────────────────────────────────────────────────────────
   private _onSelect(e: Event): void {
     const el = e.target as HTMLSelectElement & { value?: string };
-    const next = String(el.value ?? "");
+    const next = fromHaSelectValue(String(el.value ?? ""));
     const current = normalise(this.field, this.value);
     if (current.kind === "enum" && next !== current.value) this._emit(next);
   }
@@ -319,15 +349,15 @@ export class JarvisConfigField extends LitElement {
         <ha-select
           id=${this._id}
           .label=${label}
-          .value=${live(current)}
+          .value=${live(toHaSelectValue(current))}
           ?disabled=${this.disabled}
           naturalMenuWidth
           fixedMenuPosition
           @selected=${this._onSelect}
           @closed=${(e: Event) => e.stopPropagation()}
         >
-          ${inOptions ? nothing : staticHtml`<${item} .value=${current} disabled>${t("{raw} (not an option)", { raw: current || "∅" })}</${item}>`}
-          ${opts.map((o) => staticHtml`<${item} .value=${optionValue(o)}>${this._optionText(o)}</${item}>`)}
+          ${inOptions ? nothing : staticHtml`<${item} .value=${toHaSelectValue(current)} disabled>${t("{raw} (not an option)", { raw: current || "∅" })}</${item}>`}
+          ${opts.map((o) => staticHtml`<${item} .value=${toHaSelectValue(optionValue(o))}>${this._optionText(o)}</${item}>`)}
         </ha-select>
       `;
     }
@@ -517,6 +547,37 @@ export class JarvisConfigField extends LitElement {
     `;
   }
 
+  // ── field editor (plug-in) ────────────────────────────────────────────
+  private _onEditorChange(value: unknown): void {
+    this._optimistic = { value };
+    this._emit(value);
+  }
+
+  private _editorContext(label: string): FieldEditorContext {
+    return {
+      hass: this.hass,
+      data: this.data,
+      narrow: this.narrow,
+      disabled: this.disabled,
+      label,
+      id: this._id,
+      placeholder: this.placeholder,
+      host: this.host,
+    };
+  }
+
+  /** The owner's status plus the consumed keys', most severe level, messages joined. */
+  private _combinedStatus(): FieldStatus | null {
+    const all = [this.status, ...(this.statuses ?? [])].filter((s): s is FieldStatus => !!s);
+    if (!all.length) return null;
+    if (all.length === 1) return all[0];
+    const rank: Record<StatusLevel, number> = { error: 3, warn: 2, saving: 1, saved: 0 };
+    const level = all.reduce((acc, s) => (rank[s.level] > rank[acc] ? s.level : acc), all[0].level);
+    const seen = new Set<string>();
+    const message = all.map((s) => s.message).filter((m) => m && !seen.has(m) && seen.add(m)).join(" · ");
+    return { level, message };
+  }
+
   // ── row ───────────────────────────────────────────────────────────────
   override render() {
     const f = this.field;
@@ -524,15 +585,20 @@ export class JarvisConfigField extends LitElement {
     const n = normalise(f, this.value);
     const warning = "warning" in n && n.warning ? t(n.warning, { raw: rawText(this.value) }) : "";
     const isDefault = valueEquals(this.value === undefined ? f.default : this.value, f.default);
-    const status = this.status && this._note && this.status.level !== "error"
-      ? { level: this._note.level, message: `${this.status.message} · ${this._note.message}` }
-      : this.status ?? this._note;
+    const combined = this._combinedStatus();
+    const status = combined && this._note && combined.level !== "error"
+      ? { level: this._note.level, message: `${combined.message} · ${this._note.message}` }
+      : combined ?? this._note;
     const showStatus = status ? status : warning ? { level: "warn" as StatusLevel, message: warning } : null;
-    const inlineControl = n.kind === "bool";
     const label = this.label || f.label || f.key;
+    const editor = findFieldEditor(f);
+    const inlineControl = !editor && n.kind === "bool";
 
     let control: unknown;
-    switch (n.kind) {
+    if (editor) {
+      const value = this._optimistic ? this._optimistic.value : n.value;
+      control = html`<div class="control wide">${editor.factory(f, value, (v) => this._onEditorChange(v), this._editorContext(label))}</div>`;
+    } else switch (n.kind) {
       case "bool":
         control = this._renderSwitch(n.value);
         break;
@@ -564,9 +630,9 @@ export class JarvisConfigField extends LitElement {
       </div>
       ${this.help ? html`<p class="help">${this.help}</p>` : nothing}
       ${this.hint ? html`<p class="help jv-mono">${this.hint}</p>` : nothing}
-      ${inlineControl || n.kind === "list" || n.kind === "json" ? (inlineControl ? nothing : control) : html`<div class="control">${control}</div>`}
+      ${editor || inlineControl || n.kind === "list" || n.kind === "json" ? (inlineControl ? nothing : control) : html`<div class="control">${control}</div>`}
       <div class="foot">
-        ${isDefault
+        ${isDefault || editor?.noReset
           ? nothing
           : html`
               <span>${t("Default: {value}", { value: formatValue(f, f.default, t("ON"), t("OFF")) })}</span>

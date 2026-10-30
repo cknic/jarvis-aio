@@ -1,0 +1,20 @@
+{
+  "recent": [
+    {"name": "Sam", "camera_entity": "camera.front_door", "camera": "front_door", "confidence": 97.4, "age_seconds": 140,
+     "is_unknown": false, "is_resident": true, "relationship": "resident",
+     "snapshot_url": "/api/jarvis/snapshot/faces/sam.jpg", "is_low_confidence": false, "source": "recent_cache"},
+    {"name": "Alex Rivera", "camera_entity": "camera.driveway", "camera": "driveway", "confidence": 88.0, "age_seconds": 2650,
+     "is_unknown": false, "is_resident": false, "relationship": "guest",
+     "snapshot_url": "/api/jarvis/snapshot/faces/alex_rivera.jpg", "is_low_confidence": false, "source": "frigate_sensor"},
+    {"name": "Priya", "camera_entity": "camera.kitchen", "camera": "kitchen", "confidence": 61.0, "age_seconds": 400,
+     "is_unknown": false, "is_resident": true, "relationship": "resident",
+     "snapshot_url": null, "is_low_confidence": true, "source": "llm_guess"},
+    {"name": "Unknown", "camera_entity": "camera.back_yard", "camera": "back_yard", "confidence": 0.0, "age_seconds": 75,
+     "is_unknown": true, "is_resident": false, "relationship": "unknown",
+     "snapshot_url": "/api/jarvis/snapshot/faces/unknown_back_yard.jpg", "is_low_confidence": false, "source": "best_effort_unknown"}
+  ],
+  "residents": ["Priya", "Sam"],
+  "references": ["sam"],
+  "llm_face_recognition": true,
+  "recognition_source": "frigate"
+}

@@ -7,7 +7,7 @@
 //   /fixtures/*.json              -> dev/fixtures/
 //   /jarvis_panel_static/jarvis-panel.js   -> the built bundle (same URL HA uses)
 //   /jarvis_panel_static/i18n/<lang>.json  -> custom_components/jarvis/frontend/i18n/
-//   /jarvis_panel_static/jarvis-logo.png   -> custom_components/jarvis/frontend/
+//   /jarvis_panel_static/<other>           -> custom_components/jarvis/frontend/<other>
 // It also rebuilds the bundle on every source change (esbuild watch). Pass
 // --no-watch to serve only. PORT overrides 5173.
 import http from "node:http";

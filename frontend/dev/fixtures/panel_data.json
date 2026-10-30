@@ -85,7 +85,7 @@
     }
   ],
   "sleep_reason": null,
-  "doorbell_training": { "stats": { "total": 12 }, "recent": [] },
+  "doorbell_training": { "stats": { "total": 12, "notable": 3, "by_category": { "delivery": 7, "visitor": 4, "?": 1 }, "by_source": { "live": 5, "event-media": 3, "backlog": 4 }, "first": "2026-09-14T08:12:44Z", "last": "2026-10-29T13:47:02.123456Z" }, "recent": [{ "ts": "2026-10-28T17:05:19Z", "camera": "Front Door", "entity_id": "camera.front_door", "image_source": "backlog", "summary": "", "analysis": "A courier in a high-visibility vest leaves a medium parcel on the step and walks back to a white van.", "category": "delivery", "notable": false }, { "ts": "2026-10-29T13:47:02.123456Z", "camera": "Front Door", "entity_id": "camera.front_door", "image_source": "live", "summary": "Unrecognised adult at the door, rang twice, waited about a minute and left without leaving anything.", "analysis": "", "category": "visitor", "notable": true }] },
   "doors": { "front": "closed", "garage": "open" },
   "lockdown": { "active": false, "since": 0.0, "reason": "", "auto": false, "exempt_windows": 0 },
   "intrusion": { "active": false, "confirmed": false },
@@ -235,8 +235,8 @@
       "steps": []
     },
     "sentinel_rules": [
-      { "id": "garage_open_night", "name": "Garage left open at night", "category": "safety" },
-      { "id": "stove_unattended", "name": "Stove on with nobody home", "category": "safety" }
+      { "id": "garage_open_night", "desc": "Garage left open at night", "category": "safety" },
+      { "id": "stove_unattended", "desc": "Stove on with nobody home", "category": "safety" }
     ],
     "disabled_sentinel_rules": [],
     "observer_stats": {
@@ -247,8 +247,17 @@
       "reasoning": { "cache_hits": 120, "cache_misses": 34 }
     },
     "lockdown": { "active": false, "since": 0.0, "reason": "", "auto": false, "exempt_windows": 0 },
-    "appliances": { "washer": { "state": "running", "watts": 480 }, "dryer": { "state": "idle", "watts": 3 } },
-    "appliance_profile": [],
+    "appliances": {
+      "running": true,
+      "profile": [
+        { "name": "Washer", "type": "washer", "entity": "sensor.washer_power", "watts": 500, "learned_w": 468, "observed_n": 6, "mode": "entity" },
+        { "name": "Dryer", "type": "dryer", "entity": "", "watts": 2400, "learned_w": 2400, "observed_n": 0, "mode": "declared" }
+      ],
+      "tracked_sensors": [],
+      "native": ["sensor.washer_power"],
+      "whole_home": true
+    },
+    "appliance_profile": [{ "name": "Washer", "type": "washer", "entity": "sensor.washer_power", "watts": 500 }, { "name": "Dryer", "type": "dryer", "entity": "", "watts": 2400 }],
     "appliance_announce_unknown": false,
     "memory_stats": { "backend": "sqlite", "total_memories": 318, "last_consolidated": "2026-10-29T03:00:00" },
     "satellites": [
@@ -270,9 +279,64 @@
     "camera_names": { "camera.kitchen": "Kitchen" },
     "satellite_pairings": {},
     "announcement_speakers": ["media_player.living_room_tv"],
-    "floor_plan_rooms": {},
+    "floor_plan_rooms": {
+      "1f": {
+        "label": "1st Floor",
+        "rooms": [
+          {"name": "Garage", "x": 5, "y": 5, "w": 100, "h": 88, "type": "room"},
+          {"name": "Kitchen", "x": 115, "y": 5, "w": 65, "h": 40, "type": "room"},
+          {"name": "Bath", "x": 185, "y": 5, "w": 28, "h": 22, "type": "bath"},
+          {"name": "Guest Room", "x": 218, "y": 5, "w": 95, "h": 40, "type": "room"},
+          {"name": "Dining Room", "x": 115, "y": 50, "w": 65, "h": 38, "type": "room"},
+          {"name": "Stairs", "x": 185, "y": 32, "w": 28, "h": 32, "type": "stairs"},
+          {"name": "Living Room", "x": 218, "y": 50, "w": 95, "h": 38, "type": "room", "points": [[218, 50], [313, 50], [313, 88], [260, 88], [260, 75], [218, 75]]},
+          {"name": "Downstairs Hallway", "x": 115, "y": 93, "w": 198, "h": 20, "type": "room"},
+          {"name": "Front Door", "x": 185, "y": 117, "w": 50, "h": 12, "type": "door"}
+        ]
+      },
+      "2f": {
+        "label": "2nd Floor",
+        "rooms": [
+          {"name": "Eliana's Room", "x": 50, "y": 25, "w": 95, "h": 80, "type": "room"},
+          {"name": "Bath", "x": 150, "y": 25, "w": 30, "h": 40, "type": "bath"},
+          {"name": "Master Bedroom", "x": 185, "y": 25, "w": 85, "h": 80, "type": "room"},
+          {"name": "Upstairs Hallway", "x": 150, "y": 70, "w": 30, "h": 35, "type": "room"},
+          {"name": "Stairs", "x": 150, "y": 108, "w": 25, "h": 20, "type": "stairs"}
+        ]
+      },
+      "bsmt": {
+        "label": "Basement",
+        "rooms": [
+          {"name": "Basement", "x": 50, "y": 10, "w": 220, "h": 90, "type": "room"},
+          {"name": "Stairs", "x": 120, "y": 20, "w": 28, "h": 35, "type": "stairs"}
+        ]
+      }
+    },
+    "floor_plan_elements": {
+      "1f": [
+        {"id": "e1", "type": "window", "kind": null, "wall": "front", "pos": 0.3, "w": 20, "entity": ""},
+        {"id": "e2", "type": "door", "kind": "exterior", "wall": "front", "pos": 0.62, "w": 18, "entity": "binary_sensor.front_door"},
+        {"id": "e3", "type": "door", "kind": "interior", "wall": "left", "room": "Kitchen", "pos": 0.5, "w": 16, "entity": ""}
+      ],
+      "2f": [
+        {"id": "e4", "type": "dormer", "kind": null, "slope": "front", "pos": 0.35, "entity": ""}
+      ]
+    },
+    "floor_plan_cameras": {
+      "1f": [
+        {"id": "c1", "x": 230, "y": 112, "angle": 270, "fov": 90, "range": 55, "entity": "camera.living_room", "indoor": true, "coverage": {"covered": ["Living Room"], "reason": "Sees most of the Living Room.", "source": "geometry", "ts": 1761700000}}
+      ]
+    },
+    "floor_plan_entities": {
+      "1f": [
+        {"e": "binary_sensor.front_door", "x": 210, "y": 120}
+      ]
+    },
+    "floor_plan_property": {"points": [[-120, -110], [440, -110], [440, 260], [-120, 260]]},
     "floor_plan_bg": {},
-    "door_mapping": { "binary_sensor.front_door": "front", "binary_sensor.garage_door": "garage" },
+    "floor_plan_bg_opacity": 0.2,
+    "floor_plan_units": "imperial",
+    "door_mapping": {"front": "binary_sensor.front_door", "garage_1": "cover.garage_door"},
     "configured_providers": ["groq", "ollama"],
     "llm_provider": "groq",
     "model": "llama-3.3-70b-versatile",

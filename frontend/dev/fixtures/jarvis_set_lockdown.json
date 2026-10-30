@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "lockdown": {
+    "active": false,
+    "since": 0.0,
+    "reason": "",
+    "auto": false,
+    "exempt_windows": 0
+  }
+}

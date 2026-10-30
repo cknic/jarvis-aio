@@ -1,0 +1,7 @@
+[
+  { "area_id": "living_room", "name": "Living Room", "floor_id": "ground", "icon": "mdi:sofa", "picture": null, "aliases": [], "labels": [] },
+  { "area_id": "kitchen", "name": "Kitchen", "floor_id": "ground", "icon": "mdi:stove", "picture": null, "aliases": [], "labels": [] },
+  { "area_id": "master_bedroom", "name": "Master Bedroom", "floor_id": "upstairs", "icon": "mdi:bed", "picture": null, "aliases": [], "labels": [] },
+  { "area_id": "garage", "name": "Garage", "floor_id": "ground", "icon": "mdi:garage", "picture": null, "aliases": [], "labels": [] },
+  { "area_id": "back_yard", "name": "Back Yard", "floor_id": null, "icon": "mdi:tree", "picture": null, "aliases": [], "labels": ["outdoor"] }
+]

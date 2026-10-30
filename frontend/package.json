@@ -11,7 +11,8 @@
     "smoke": "node scripts/smoke.mjs",
     "dev": "node scripts/dev-server.mjs",
     "i18n:keys": "node scripts/i18n-keys.mjs",
-    "all": "npm run check && npm run lint:theme && npm run build && npm run smoke"
+    "i18n:report": "node scripts/i18n-keys.mjs --json --out i18n-missing.json",
+    "all": "npm run check && npm run lint:theme && npm run build && npm run smoke && npm run i18n:report"
   },
   "engines": {
     "node": ">=22"

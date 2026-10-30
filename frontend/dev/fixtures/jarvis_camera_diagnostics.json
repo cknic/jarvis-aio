@@ -1,0 +1,22 @@
+{
+  "summary": [
+    { "entity_id": "camera.front_door", "state": "idle", "platform": "nest" },
+    { "entity_id": "camera.kitchen", "state": "unavailable", "platform": "generic" },
+    { "entity_id": "camera.garage", "state": "recording", "platform": "frigate" }
+  ],
+  "platforms": { "nest": 1, "generic": 1, "frigate": 1 },
+  "probe": {
+    "entity_id": "camera.front_door",
+    "tiers": [
+      ["backend-match", "nest (event media manager present)"],
+      ["backend:nest", "no recent event media within 120s"],
+      ["snapshot", "OK 1280x720 JPEG (48213 bytes)"]
+    ],
+    "verdict": "frames available via standard snapshot",
+    "state": "idle",
+    "available": true,
+    "attrs": { "brand": "Google Nest", "model": "Doorbell (battery)", "supported_features": 2, "frontend_stream_type": "web_rtc" },
+    "platform": "nest",
+    "elapsed_ms": 1840
+  }
+}

@@ -1,0 +1,5 @@
+[
+  { "label_id": "noisy", "name": "Noisy", "color": "amber", "icon": "mdi:volume-high", "description": "Sensors that chatter" },
+  { "label_id": "outdoor", "name": "Outdoor", "color": "green", "icon": "mdi:tree", "description": null },
+  { "label_id": "ignore_jarvis", "name": "Ignore (JARVIS)", "color": null, "icon": null, "description": "Excluded from awareness" }
+]

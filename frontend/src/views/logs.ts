@@ -4,11 +4,12 @@
  * Cards (src/views/logs/): System Log (jarvis/get_debug_log), Activity Feed
  * (jarvis/get_activity_log), System Diagnostics (jarvis/diagnostics +
  * get_calibration, on demand), Cognitive Core (jarvis/get_cognitive_status)
- * and Governance (jarvis/get_enforcement / set_enforcement).
+ * and Governance (jarvis/get_enforcement, a read-only summary; the switches
+ * are written in Settings › Governance).
  *
  * This element owns the polling: the log, activity and cognitive status are
  * re-read every 20 s while the document is visible, the governance list on
- * enter / Refresh / after a write. Diagnostics is expensive and only runs on
+ * enter / Refresh. Diagnostics is expensive and only runs on
  * its own "Run check" button. Nothing here touches the snapshot (`data`).
  * Spec: frontend/specs/logs.md.
  */

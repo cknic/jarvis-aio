@@ -1,0 +1,8 @@
+{
+  "profiles": [{"name": "Sam", "count": 3, "updated": 1761600000.0}, {"name": "Priya", "count": 1, "updated": 1761500000.0}],
+  "current": {"name": "Sam", "score": 81.2, "similarity": 0.8123, "count": 3, "trusted": true},
+  "local_enabled": true,
+  "delegate_stt": "stt.faster_whisper",
+  "model_path": "",
+  "backend_available": true
+}

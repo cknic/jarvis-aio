@@ -131,5 +131,11 @@ jobs:
         run: git diff --exit-code -- ../custom_components/jarvis/frontend/jarvis-panel.js
       - name: Bundle is valid JavaScript
         run: node --check ../custom_components/jarvis/frontend/jarvis-panel.js
-      - name: Panel smoke test (jsdom, light + dark, every view)
+      - name: Panel smoke test (jsdom - every view, Settings tools, editor tabs, fixture coverage)
         run: npm run smoke
+      - name: Translators' report is current
+        # frontend/i18n-missing.json (the per-language list of untranslated
+        # panel strings) is generated; regenerate and commit it with every
+        # string or dictionary change (`npm run i18n:report`, part of
+        # `npm run all`).
+        run: npm run i18n:report && git diff --exit-code -- i18n-missing.json
