@@ -101,6 +101,16 @@ HAZARD_SITUATION_ENFORCE = True
 # load. The gate fails safe to the legacy decision on any kernel fault.
 INTRUSION_GATE_ENFORCE = True
 
+# MCU Phase R (R3c) — intrusion SITUATION-lifecycle ENFORCE kill-switch. When True
+# (default), a user "false alarm" call-off is honoured DURABLY across a reload:
+# the dismissal drives the kernel situation to BENIGN, and _check_intrusion reads
+# that lifecycle state back (intrusion.kernel_calloff_active_sync) so JARVIS does
+# not immediately re-alarm on the same benign motion after a restart that lost the
+# in-memory call-off window. ADDITIVE and fail-safe: a None/error read suppresses
+# nothing, so it only reduces false alarms and can never miss a real intrusion.
+# Flip to False to revert to the in-memory-only call-off window.
+INTRUSION_SITUATION_ENFORCE = True
+
 # Away false-alarm fix (8.69.0) — harden intrusion CONFIRMATION under a degraded
 # hold. When the home is "away" only because a lockdown is being HELD through an
 # unreadable alarm panel (a Cove/Alula cloud drop), a resident is very likely
@@ -487,6 +497,22 @@ class SafetyManager:
         except Exception:   # pragma: no cover - defensive
             pass
 
+        # R2c — durable WARNING de-dup. The in-memory _freeze_warned is lost on a
+        # reload, so a freeze already announced before a restart could re-warn.
+        # When the kernel situation store still holds an open freeze episode, adopt
+        # "already warned" so the duplicate warning is suppressed. CRITICAL is
+        # never suppressed below (it fails toward alerting); fail-safe — a
+        # None/error read leaves _freeze_warned as-is, so a warning still fires.
+        if (HAZARD_SITUATION_ENFORCE and verdict == "warning"
+                and not self._freeze_warned):
+            try:
+                from . import hazard_situation
+                if await self.hass.async_add_executor_job(
+                        hazard_situation.kernel_freeze_active_sync, self.hass):
+                    self._freeze_warned = True
+            except Exception:   # pragma: no cover - defensive, fail toward alert
+                pass
+
         if verdict == "critical":
             self._last_freeze_alert = now
             await self._mirror_freeze_hazard("critical", reading)
@@ -839,6 +865,15 @@ class SafetyManager:
             from . import intrusion as _intr
             if _intr.is_called_off():
                 return None
+            # R3c — durable call-off: the in-memory window above is lost on a
+            # reload, so also honour a recent false-alarm dismissal recorded in the
+            # kernel situation store (a BENIGN intrusion episode). Additive and
+            # fail-safe: a None/error read suppresses nothing (never over-suppresses
+            # a real intrusion); kill-switch INTRUSION_SITUATION_ENFORCE.
+            if INTRUSION_SITUATION_ENFORCE:
+                if await self.hass.async_add_executor_job(
+                        _intr.kernel_calloff_active_sync, self.hass, now):
+                    return None
         except Exception:
             pass
 
@@ -4656,6 +4691,19 @@ async def _execute_action_data(hass, action_data: dict) -> bool:
         if not _eff_ok:
             _LOGGER.info("Proactive action held by the authority engine, "
                          "skipped: %s.%s on %s", domain, service, eid)
+            continue
+        # MCU Phase H — cross-path thrash gate: the event-bus reactor has been
+        # fed this target's actuations from EVERY path (not just this one), so a
+        # system-wide oscillation the per-path G2 gate can't see shows up here.
+        # Back off this target on confirmed cross-path thrash. Fails open.
+        try:
+            from . import actuation
+            _stream_ok, _sreason = actuation.stream_thrash_check(f"{capability}:{eid}")
+        except Exception:   # pragma: no cover - fail open
+            _stream_ok = True
+        if not _stream_ok:
+            _LOGGER.warning("Proactive action suppressed by cross-path thrash "
+                            "(%s on %s) — %s", capability, eid, _sreason)
             continue
         try:
             from . import actuation
