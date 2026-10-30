@@ -81,7 +81,7 @@ SafetyManager, own a safety verdict stays behind its own per-flip go/no-go.
 | `beliefs` | ◐ shadow | `agent` |
 | `budget` | ● enforce | `actuation` |
 | `causal` | ● enforce | `pattern_analyzer` |
-| `certification` | ● enforce | `actuation`, `agent`, `cognitive_core`, `continuity`, `identity` |
+| `certification` | ● enforce | `actuation`, `agent`, `cognitive_core`, `continuity`, `identity`, `intrusion` |
 | `conflict` | ◑ parity | `presence` |
 | `coordination` | · pure | — *(staged ahead)* |
 | `correlation` | ◐ shadow | `actuation`, `cognitive_core`, `decision_record`, `observer`, `proactive_audio` |
@@ -107,15 +107,15 @@ SafetyManager, own a safety verdict stays behind its own per-flip go/no-go.
 | `privacy` | · pure | — *(staged ahead)* |
 | `provenance` | ◐ shadow | `continuity`, `knowledge`, `presence`, `recognition` |
 | `resilience` | ◐ shadow | `connectivity` |
-| `router` | ◐ shadow | `reasoning_loop` |
+| `router` | ◑ parity | `reasoning_loop` |
 | `self_model` | ● enforce | `agent` |
-| `situation` | ● enforce | `agent`, `cognitive_core`, `continuity`, `delivery_situation`, `events`, `hazard_situation`, `intrusion` |
+| `situation` | ● enforce | `actuation`, `agent`, `cognitive_core`, `continuity`, `delivery_situation`, `events`, `hazard_situation`, `intrusion` |
 | `social` | · pure | — *(staged ahead)* |
 | `space_time` | ● enforce | `cognitive_core`, `proactive_audio` |
 | `surfaces` | · pure | — *(staged ahead)* |
 | `temporal` | ◐ shadow | `agent`, `knowledge` |
 | `token_telemetry` | ● enforce | `llm_provider` |
-| `uncertainty` | ◑ parity | `identity`, `knowledge` |
+| `uncertainty` | ● enforce | `identity`, `knowledge` |
 | `working_memory` | ● enforce | `cognitive_core`, `output_gate` |
 | `world_model` | ● enforce | `actuation`, `agent`, `cognitive_core`, `continuity`, `home_state`, `presence`, `proactive_briefing` |
 

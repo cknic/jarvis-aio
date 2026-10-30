@@ -296,16 +296,23 @@ _DECLARED: dict[str, dict] = {
     # an Uncertain (value=person / the computed confidence / basis=voting methods
     # / resolver for a weak read), logs its epistemic band, AND compares whether
     # gating on the band (is_actionable) agrees with the legacy min-confidence
-    # "known" decision — observe-only, the Identification returned is unchanged,
-    # nothing gates on the band yet (enforce when a decision gates on the band).
-    # COVERAGE (Epistemic Fabric — "world-model wraps outputs too"):
-    # knowledge.all_facts() logs the epistemic-band distribution of the curated
-    # facts (UNCERTAINTY_SHADOW), broadening the primitive from perception to
-    # curated knowledge (observe-only). The kernel world_model.uncertainties()
-    # facade exposes the same facts as Uncertain values (kernel-internal, so not a
-    # live-adoption owner). The declared stage tracks the furthest anchor
-    # (identity, parity).
-    "uncertainty":  {"stage": "parity",  "owners": ["identity", "knowledge"]},
+    # "known" decision — the [min_confidence, actionable) divergence region.
+    # ENFORCE (owner-gated, default OFF): resolve() now GATES on that band — with
+    # `uncertainty_enforce` on, a verdict that clears min_confidence but whose
+    # confidence is below the actionable (BELIEVED) band is treated as NOT
+    # identified (returns UNKNOWN / "band_not_actionable"), so an uncertain read
+    # falls toward MORE confirmation. Downward-only and safety-forward (it only
+    # withholds an identification, never widens one); fail-safe = the legacy
+    # decision; kill-switch UNCERTAINTY_ENFORCE / the `uncertainty_enforce` key,
+    # default OFF so behaviour is preserved until the owner flips it. This is the
+    # authoritative live path the parity emit pointed at. COVERAGE (Epistemic
+    # Fabric — "world-model wraps outputs too"): knowledge.all_facts() logs the
+    # epistemic-band distribution of the curated facts (UNCERTAINTY_SHADOW),
+    # broadening the primitive from perception to curated knowledge (observe-only).
+    # The kernel world_model.uncertainties() facade exposes the same facts as
+    # Uncertain values (kernel-internal, so not a live-adoption owner). The declared
+    # stage tracks the furthest anchor (identity, enforce).
+    "uncertainty":  {"stage": "enforce", "owners": ["identity", "knowledge"]},
     # conflict: formal conflict resolution between contradictory evidence
     # (Epistemic Fabric, audit-added). Consumes Provenance records; resolve()
     # scores each (confidence × source-reliability × recency × corroboration),
@@ -538,9 +545,14 @@ _DECLARED: dict[str, dict] = {
     # unpopulated set. Ladder: pure → shadow → parity → enforce.
     "working_memory": {"stage": "enforce", "owners": ["cognitive_core", "output_gate"]},
     # router: reasoning_loop computes the kernel local-first provider route
-    # alongside its live cloud/local-Mind breaker decision and logs divergence
-    # (E3) — shadow.
-    "router":       {"stage": "shadow",  "owners": ["reasoning_loop"]},
+    # alongside its live cloud/local-Mind breaker decision. SHADOW logged each
+    # pass's divergence (E3). PARITY (reflex-speed precursor): over a rolling
+    # window it now logs how often the kernel route AGREES with the live breaker
+    # decision (ROUTER_PARITY / `router_parity`) — the quantified bar the
+    # owner-gated enforce rung needs before the kernel route (which can prefer a
+    # local tier for latency) becomes authoritative. Observe-only, drives nothing;
+    # the breaker stays authoritative. Ladder: pure → shadow → parity → enforce.
+    "router":       {"stage": "parity",  "owners": ["reasoning_loop"]},
     # causal: causal learning + prediction (roadmap Phase L). ΔP contingency
     # hypotheses (cause → effect) with a prediction surface — predict(context) /
     # explain(effect). SHADOW (Phase L): pattern_analyzer.analyze() folds the

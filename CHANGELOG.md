@@ -273,8 +273,181 @@ editor, faces and voices, documents, camera tools and doorbell training,
 teaching and forgetting facts, labelling intrusion events, applying
 suggestions, the full settings catalogue, logs and the governance switches.
 
-`manifest.json` tracks upstream (`9.44.0`); the fork version is a changelog marker
+`manifest.json` tracks upstream (`9.49.0`); the fork version is a changelog marker
 until the first tagged fork release.
+
+## [9.49.0] — Model router: local-first routing advances shadow → parity (reflex-speed precursor)
+
+The reflex-speed lever is running JARVIS on a local model instead of round-tripping
+to the cloud — **already supported** today via the first-class `ollama` provider
+(configure it + a base URL in Settings). This release advances the *kernel* side
+one honest rung: `kernel/router.py` (the pure local-first latency router) moves
+**shadow → parity** in `reasoning_loop`.
+
+- **Parity emit.** `reasoning_loop._router_shadow` already computed the kernel
+  local-first route alongside the live breaker decision (cloud when online, the
+  local Mind when the breaker is open) and logged per-pass divergence. It now also
+  folds each pass into a bounded rolling window and logs the running **agreement
+  rate** (`router(parity): n=… agree=… rate=…`) every 20 passes — the quantified
+  "the kernel route reproduces the incumbent on real traffic" bar the owner-gated
+  enforce rung needs before the kernel route (which can prefer a local tier for
+  latency) becomes authoritative.
+- **Observe-only.** The breaker stays authoritative; the emit drives nothing and
+  never affects reasoning. Kill-switch `ROUTER_PARITY` / the `router_parity` config
+  key (default on, like the other parity emits). `router` moves ◐ shadow → ◑ parity
+  in `KERNEL_ADOPTION.md` + the Constitution ledger (regenerated).
+
+Honest scope: this is the precursor rung, not the reflex win itself. The actual
+"route latency-sensitive calls to the local model" step is the **owner-gated
+enforce** — a real provider-selection change (privacy / quality / latency
+trade-offs) that this parity exists to de-risk. No coverage-matrix cell moves.
+
+## [9.48.0] — The last two AE scenario classes gain honest observers (MCU certification 8/10 → 10/10 observable)
+
+Closes audit finding **B1**: the two scenario classes that could not certify —
+`conflicting_priorities` and `cognitive_error` — now have honest live observers
+rooted in real lifecycle events, so the Phase AE MCU-certification suite can reach
+`is_certified` instead of being capped at 8/10 observable. The certification
+honesty gate (`kernel_certification_check.py`), which *enforces* that no class is
+falsely wired, now lists all ten as observed and an empty open-work list.
+
+- **`conflicting_priorities`** (convenience vs. safety): observed where
+  `cognitive_core._execute_action_data` withholds a discretionary (convenience)
+  action because an active intrusion/hazard situation outranks it on the priority
+  ladder — a closed loop (situation elevated → ladder → convenience suppressed),
+  reconstructable from the situation stream.
+- **`cognitive_error`** (bad belief → observation → correction): observed where
+  `intrusion._mirror_situation_sync` corrects a live intrusion belief
+  (possible / investigating / confirmed) to **BENIGN** on a false-alarm dismissal —
+  a closed loop reconstructable from the situation ledger. (`intrusion` joins the
+  `certification` primitive's owners in the adoption census, regenerated.)
+- **Honest by construction.** Both emits are **observe-only** — they change
+  neither the suppression decision nor the situation transition. They mark
+  `closed_loop=True` only at the point the loop has actually completed, and the
+  certification ledger is sticky-best (a class that has *ever* closed stays closed
+  for the window), so the suite asks "has this class been demonstrated to close at
+  least once," never faked. No coverage-matrix cell moves.
+
+Also records, in `docs/AUDIT_2026-10.md`, a **resolution log** noting B1 and the
+§6 test-isolation finding (the unit suite reading the host's live `/config`) are
+both now resolved — without rewriting the dated snapshot.
+
+## [9.47.0] — Identity gates on the epistemic band (Epistemic-Fabric Uncertainty enforce, owner-gated)
+
+Advances the kernel `uncertainty` primitive **parity → enforce** (#237): identity
+resolution now *gates on the epistemic band*, not merely a confidence threshold.
+A verdict JARVIS is only confident *enough to guess* about is treated as not-yet-
+known — the "identity ≠ certainty" discipline, and a direct prerequisite for the
+identity-before-autonomy ordering in the roadmap.
+
+- **The gate.** `identity.resolve()` already packaged its fused verdict as a
+  `kernel.uncertainty.Uncertain` with an epistemic band (known ≥ 0.95 / believed ≥
+  0.60 / guessed ≥ 0.30 / unknown) and logged, at parity, whether gating on the
+  band (`is_actionable`, ≥ the believed threshold) agreed with the legacy
+  min-confidence decision. They diverge in the `[identity_min_confidence (0.45),
+  actionable (0.60))` region. With the new `uncertainty_enforce` switch on, a
+  verdict in that region — one legacy calls "known" but the fabric still calls a
+  **guess** — is returned as `UNKNOWN` (`method="band_not_actionable"`), so an
+  uncertain identity read falls toward **more** confirmation.
+- **Safety-forward and contained.** Downward-only: it can only ever *withhold* an
+  identification, never widen one. Its own kill-switch, **independent** of the
+  identity-fabric (presence ≠ identity) gate — the two tighten identity on
+  different axes (method vs. confidence band) and compose. Fail-safe: any fault in
+  the band computation falls through to the legacy verdict. A low-confidence read
+  below `min_confidence` still returns early as before — the band gate only ever
+  governs the believed-but-not-actionable middle.
+- **Honest accounting.** `uncertainty` moves ◑ parity → ● enforce in
+  `KERNEL_ADOPTION.md` and the Constitution ledger (regenerated) — the
+  authoritative live path the parity emit pointed at. No coverage-matrix cell
+  moves (uncertainty is an Epistemic-Fabric primitive, not a coverage path).
+
+**PAUSE for owner before enabling:** the switch ships **OFF** and is the owner's
+to flip — it gates who JARVIS treats as identified. Kill:
+`identity.UNCERTAINTY_ENFORCE` / the `uncertainty_enforce` config key.
+
+## [9.46.0] — Graduated autonomy, earned per capability (Phase N enforce — the held rung, owner-gated)
+
+The kernel plan held one Phase N rung for the owner: *replace the blanket
+auto-actions flag with the EARNED per-capability level.* This ships it — a real
+MCU-butler behaviour, not a coverage move (it touches no coverage-matrix cell; the
+`autonomy` primitive was already enforce via the security ceiling). JARVIS now
+**earns** the right to act on a convenience pattern, rather than acting on the
+one-size-fits-all mode flag.
+
+- **A capability must earn ACT before it auto-acts.** When the new, opt-in
+  `autonomy_earned_enforce` switch is on, a granted proactive pattern whose
+  non-safety capability has not yet reached the top autonomy rung (`ACT`) on its
+  **verified** track record falls back to **asking** instead of acting silently.
+  The earned level is read from the *same* rolling verified-outcome window as the
+  Phase N shadow/parity emit (`actuation.capability_earned_grant` →
+  `kernel.autonomy.grant`), so the enforce consumer and the parity signal share one
+  source of truth. This is exactly the divergence the Phase N parity emit measured
+  (earned level vs. blanket flag), now resolved.
+- **Its own switch, independent of the security-ceiling `autonomy_enforce`.** A
+  household that already opted into the security ceiling sees **no behaviour
+  change**; earned graduation is a separate, deliberate opt-in. Default OFF is
+  behaviour-preserving (the would-be decision is shadow-logged regardless).
+- **Safe by construction.** Downward-only — it can only ever *withhold*
+  auto-action, never grant it. SAFE capabilities stay pinned at `ACT` (reads always
+  act); SECURITY is already withheld by the ceiling above; so this bites only
+  SENSITIVE actuation (lights / climate) that has not proven itself. Fail-safe: an
+  underivable capability or any fault acts as today. Recovery is automatic — the
+  outcome window is bounded, so a capability climbs to `ACT` as the loop sees clean
+  verified outcomes and demotes if its record lapses.
+- **Governance preserved:** the gate runs *before* the Phase AC context cap and the
+  Phase M→N trust damper, and safety events never route through `is_autonomous` at
+  all — so earned autonomy can never override authority or a safety concern. Kill:
+  `AUTONOMY_EARNED_ENFORCE` / the `autonomy_earned_enforce` config key.
+
+**PAUSE for owner before enabling:** like every autonomy enforce step, the switch
+ships **OFF** and is the owner's to flip — it changes what JARVIS does without
+asking. No coverage-matrix cell moves; this is behaviour depth, not a metric.
+
+## [9.45.0] — Pause autonomy during a safety situation: the situation stream becomes consumed (coverage 67.4% → 68.8%)
+
+A genuine, value-driven piece (not a coverage-chase): a bus **situation reactor**
+so JARVIS stops its routine, self-directed automations while it is handling a
+security or safety event. A thoughtful butler doesn't run the learned "dim the
+lights at dusk" pattern in the middle of investigating a possible intruder.
+
+- **New consumer of the situation event stream.** `actuation._situation_react`
+  subscribes to the kernel `situation.transition` stream (registered at setup via
+  `register_situation_reactor`, reconciled from the durable store at boot) and
+  tracks which **safety-critical** situations (intrusion / hazard) are currently
+  *elevated* (`possible`/`investigating`/`confirmed`/`response` — **not** a benign
+  false-alarm or a resolved episode). Keyed by `situation_id`, so overlapping
+  episodes don't clear each other.
+- **Discretionary autonomy pauses while one is active.** The discretionary-
+  autonomous path (`cognitive_core._execute_action_data`) now consults
+  `actuation.safety_situation_active()` alongside the existing G1/G2/G4b gates and
+  backs off *en masse* while an intrusion or hazard is being handled. **Bounded,
+  additive, fail-open:** it only ever suppresses *discretionary* autonomy — never
+  a user request or a safety response (those don't reach this path) — and any
+  reactor fault leaves autonomy running. Reversible via
+  `SITUATION_AUTONOMY_SUPPRESS_ENFORCE`.
+
+This makes the **situation stream a consumed nervous system**, the same way Stage
+3a made the actuation stream one: `intrusion` and `hazard` reach `event` **● full**
+(their transitions now *drive* the autonomy back-off). **`delivery` stays `◑`
+parity — deliberately and honestly:** the reactor receives delivery transitions
+but never acts on them (a package is not a safety situation), so it is not
+credited. Applicable kernel coverage **67.4% → 68.8%**.
+
+On the rest of the way to 80%: the other candidate flips (routing the actuation
+*verify* read-back through the WorldModel facade; crediting the set_mode / goal
+event streams; friday authority; the goals world_model/authority cells) were
+investigated and **declined as build-for-the-metric** — the verify facade read is
+cosmetic (its `state` is identical to raw), those event streams have no genuine
+consumer, friday is already authority-enforced via its grant-set handlers, and
+goals doesn't actuate directly. The matrix stays honest rather than inflated.
+
+Tests: the reactor tracks an elevated intrusion/hazard and clears on
+resolve/benign; ignores delivery and non-situation events; overlapping episodes
+are independent; `register_situation_reactor` subscribes to the stream;
+`safety_situation_active` honours the kill-switch and fails open; the autonomous
+path pauses when a safety situation is active and proceeds when not. All 7 kernel
+gates + audit clean; adoption census updated (`actuation` now adopts `situation`).
+Ships as **9.44.0 → 9.45.0**.
 
 ## [9.44.0] — Situation-lifecycle enforce: consumers act on the kernel Situation (coverage 65.3% → 67.4%)
 
