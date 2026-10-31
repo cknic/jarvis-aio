@@ -268,6 +268,53 @@ through `config_apply.async_apply_many`, like every other settings write.
   in the panel, the onboarding card and area sparklines.
   Details: [docs/panel.md](docs/panel.md).
 
+### Phase 4 — polish from the first real-HA pass
+
+- **Floor-plan backgrounds no longer share one 4 MiB budget.** A new
+  admin-only command, `jarvis/set_floor_background {floor, image?, align?}`,
+  merges one floor server-side (validated: `data:image/` URLs only, a sane
+  floor key, `x / y / w` alignment) and saves through
+  `config_apply.async_apply_many`. The editor sends one floor per message, so
+  each image, not all of them together, has to fit HA's websocket frame; an
+  alignment nudge no longer resends every image, and a plan file with several
+  images is written floor by floor and names the floors that failed. The
+  vacuum-map import shares the same write. Verified live with three 3.4 MB
+  floors (10 MB stored) on one connection.
+- **Keyboard focus survives removals.** One helper (`frontend/src/focus.ts`)
+  moves focus to the same control in the next row, else the previous one,
+  else a fallback, after a Remove in the editor's openings, doors, pins and
+  rooms, the Settings lists (appliances, pairings, voice confirmation,
+  biometrics map, muted announcements) and the editor's toasts; it waits for
+  a websocket write to answer before placing focus. *Remove background*
+  hands focus to the upload button that replaces it. `jv-picker.focus()` now
+  reaches the button inside HA's nested entity picker.
+- **Overlapping writes.** Immediate-save editor keys track a sequence per key:
+  only the latest write sets the status or reverts, a failure reverts to the
+  last confirmed value, and per-floor background writes fold in whatever order
+  they answer. A focused toast pauses its auto-dismiss; busy state in the
+  Import tab is owned per operation.
+- **Phones below 380 px.** Checked at 320 and 360 px in HA's own frontend:
+  nothing scrolls sideways. Card actions wrap under a short title instead of
+  truncating it, the app bar drops the logo mark so "JARVIS" fits, and the
+  editor canvas follows the plan's aspect ratio (no half-empty portrait box;
+  the grid fills the whole canvas).
+- **`ha-select` labels.** The muted-announcement category and the editor's
+  selects pass "— none —" as a stand-in value so HA floats the label instead
+  of drawing it over the text.
+- **Cleanups.** Documents enable/disable call `jarvis/semantic_search` once
+  (no double write); Cameras no longer mirrors location lists by hand; a dead
+  Logs listener is gone; specs and READMEs match the code again.
+- **Translations reviewed.** A second, independent pass over all 22
+  dictionaries applied 923 corrections (terminology such as *entity* /
+  *device*, floor naming per locale, Traditional-Chinese vocabulary for
+  zh-hk / zh-tw, roof-face and occupancy-state meanings), each checked for
+  intact placeholders. Native speakers are still welcome.
+- **Tests.** The smoke test grew from 494 to 594 checks (background
+  writes and failures, focus after every Remove including slow and failing
+  writes, overlapping writes, toast holds, the narrow canvas, every Settings
+  editor asserted with a completeness check); 36 new Python tests cover the
+  background command and its admin gating.
+
 What stays panel-only (admins): the 3D Residence view and the floor-plan
 editor, faces and voices, documents, camera tools and doorbell training,
 teaching and forgetting facts, labelling intrusion events, applying

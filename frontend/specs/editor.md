@@ -5,34 +5,48 @@ Derived from the OLD panel's Settings › Floor Plan editor (`git show 47bede5:c
 `_renderPlanEntities` L4134, `_renderDoorMapping` L3880, `_doorSlots` L3780, `_doorEntityOptions` L3854,
 coverage geometry L3206–3340, plan/element/camera/entity getters L3028–3135, 3D preview L3477–3500,
 control wiring `_wireFloorPlanControls` L6998–7395, pointer wiring `_wireFloorPlanDrag` L7405–7760) and from the
-backend (`websocket.py` handlers `ws_update_config` L1489, `ws_compute_camera_coverage` L1461,
-`ws_floorplan_sources` L1643, `ws_import_floorplan` L1664, `ws_segment_floorplan_rooms` L1692;
+backend (`websocket.py` handlers `ws_update_config`, `ws_compute_camera_coverage`, `ws_floorplan_sources`,
+`ws_import_floorplan`, `ws_set_floor_background`, `ws_segment_floorplan_rooms`;
 `floorplan_import.py`, `floorplan_segment.py`, `camera_coverage.py`, `config_apply.py` catalogue,
 `door_state.py`, `residence_graph.py`, `camera.py::_parse_coverage_rooms`;
 `scripts/sweethome3d_to_floorplan.py`). The builder does **not** need to open the old panel: every contract,
 algorithm and string it needs is here. Where this spec and the old code differ, this spec wins.
 
-Route: **`/jarvis/residence/editor`** — a sub-path of the Residence view (`route.path === "/residence/editor"`,
-`subPath === "editor"`). Admin-only like the whole panel (every command below is `@websocket_api.require_admin`).
+Route: **`/jarvis/residence/editor[/<tab>]`** — a sub-path of the Residence view (`route.path` starts
+`/residence/editor`; `subPath` is `editor` or `editor/<tab>` with `<tab>` one of `rooms`, `openings`, `doors`,
+`pins`, `import`; no tail or an unknown tail = `rooms`). Admin-only like the whole panel (every command below
+is `@websocket_api.require_admin`).
 
-Files the editor builder owns: `frontend/src/views/residence/editor/**` (suggested split below) and the
-fixtures `frontend/dev/fixtures/jarvis_floorplan_sources.json`, `jarvis_import_floorplan.json`,
-`jarvis_segment_floorplan_rooms.json`, `jarvis_compute_camera_coverage.json`. Two **minimal** edits to
-shared files are required and allowed (see §10 R1): (a) `src/views/residence.ts` mounts
-`<jarvis-floorplan-editor>` in place of its normal content when `this.subPath === "editor"`, and its
-"Import a floor plan" docs link becomes an "Edit floor plan" button that calls
-`this.navigate("residence", "editor")`; (b) `dev/fixtures/panel_data.json` gains a realistic
-`config.floor_plan_*` / `door_mapping` block (§2.10) so the harness shows a plan.
+Files the editor owns: `frontend/src/views/residence/editor/**` (layout below; its `README.md` is the
+foundation API the tabs are written against) and the fixtures `frontend/dev/fixtures/jarvis_floorplan_sources.json`,
+`jarvis_import_floorplan.json`, `jarvis_segment_floorplan_rooms.json`, `jarvis_set_floor_background.json`,
+`jarvis_compute_camera_coverage.json`. Two **minimal** edits to shared files (see §10 R1): (a)
+`src/views/residence.ts` imports `./residence/editor/editor` and renders
+`<jarvis-plan-editor .hass .narrow .data .route>` in place of its normal content when
+`this.subPath.split("/")[0] === "editor"`, and its "Import a floor plan" docs link became an "Edit floor plan"
+button that calls `this.navigate("residence", "editor")`; (b) `dev/fixtures/panel_data.json` carries a
+realistic `config.floor_plan_*` / `door_mapping` block (§2.10) so the harness shows a plan.
 
 ```
 src/views/residence/editor/
-  editor.ts        <jarvis-floorplan-editor>: shell, toolbar, sub-tabs, save/dirty, snapshot sync
-  model.ts         EditorDoc types, parse*/serialize*, floor list, unit helpers (§3)
-  history.ts       undo/redo stack (§4.3)
-  canvas.ts        <jv-plan-canvas>: SVG layers + Pointer Events controller (§4.1–4.2, 4.4–4.6)
-  geometry.ts      polygon/bbox helpers, walls+gaps, ray casting, clipped cone, coverage sampling (§4.7)
-  tabs/rooms.ts, tabs/openings.ts, tabs/doors.ts, tabs/cameras.ts, tabs/import.ts
-  import/sweethome3d.ts, import/zip.ts, import/image.ts   (§6 I-actions)
+  editor.ts        <jarvis-plan-editor> (extends JarvisView): header, banners, Plan card + sub-tab chips,
+                   side card hosting the active tab element, 3D preview, toasts, shortcuts, leave guards
+  store.ts         EditorStore: working copy, history, dirty/save, writeSetting, writeFloorBackground,
+                   floor/tab/selection, toasts; EDITOR_TABS; the only module that talks to the backend
+  model.ts         EditorDoc types, parse*/serialize*, floor list, units, ids, pickers, doc operations (§3)
+  history.ts       History<T>: snapshot undo/redo with coalescing (§4.3)
+  canvas.ts        <jv-plan-canvas>: Layer API (registerLayer), built-in grid/background/ghost/rooms/overlay
+                   layers, Pointer Events controller (§4.1–4.2, 4.4–4.6)
+  geometry.ts      markerRect, walls+gaps, ray casting, clipped cone, coverage sampling, coverageContext (§4.7)
+  tab-base.ts      JarvisEditorTab: optional base class of the tab elements
+  selftest.ts      dev-only model assertions (parse/serialize round trip, units, geometry), run by the smoke test
+  i18n-keys.ts     literal t() calls for label tables (read by npm run i18n:keys; not bundled)
+  tabs/index.ts    the barrel: one import per tab
+  tabs/rooms.ts (+ rooms-layers.ts, rooms-controls.ts, rooms-dialog.ts, rooms-menu.ts)   <jarvis-editor-rooms>
+  tabs/openings.ts  <jarvis-editor-openings>     tabs/doors.ts  <jarvis-editor-doors>
+  tabs/pins.ts      <jarvis-editor-pins> (cameras + pins)   tabs/openings-doors-pins-shared.ts
+  tabs/import.ts (+ import-layers.ts, import-image.ts, import-plan.ts, import-sh3d.ts, import-zip.ts)
+                    <jarvis-editor-import> (§6 I-actions; background alignment layer + tool)
 ```
 
 It reuses, unchanged: `../plan.ts` (`parsePlan`, `parseElements`, `planToFeet`, `elementsToFeet`,
@@ -60,16 +74,18 @@ model receives (`camera.py`), and the door slots of the model (`door_state.py`) 
   walls (bleeding through openings), AI-judged coverage; arbitrary entities pinned on the plan with live
   state.
 * **Import**: background image per floor (file upload, or straight from a vacuum-map / dashboard `image.*`
-  / `camera.*` entity) with opacity; automatic room detection from a vacuum map; SweetHome3D
+  / `camera.*` entity) with opacity and a per-floor **alignment** (top-left corner + width in plan units,
+  typed or dragged/scaled on the plan); automatic room detection from a vacuum map; SweetHome3D
   (`.sh3d` / `Home.xml` / JSON export) conversion; JSON export/import of the whole plan; property
   boundary; reset to the sample plan.
 * **House shape** keys that drive the 3D massing (stories, basement, dormers, garage bays, chimney,
   bedrooms/bathrooms, square footage, style) and the units toggle.
 
 Everything is edited on a working copy with undo/redo and saved explicitly (one `jarvis/update_config` per
-changed key); a handful of independent settings save immediately (units, background image, opacity,
-door mapping, house-shape keys). Pointer Events throughout (mouse, touch, pen); keyboard-operable; follows
-the HA theme (tokens only, see DESIGN.md).
+changed key); a handful of independent settings save immediately (units, opacity, door mapping, house-shape
+keys through `jarvis/update_config`; a floor's background image and alignment through
+`jarvis/set_floor_background`, one floor per message). Pointer Events throughout (mouse, touch, pen);
+keyboard-operable; follows the HA theme (tokens only, see DESIGN.md).
 
 ---
 
@@ -92,7 +108,8 @@ interface EditorConfigSlice {
   floor_plan_cameras:    unknown; // dict {floor: CameraPin[]}
   floor_plan_entities:   unknown; // dict {floor: EntityPin[]}
   floor_plan_property:   unknown; // dict {points: [[x,y],...]} | {} | string
-  floor_plan_bg:         unknown; // dict {floor: "data:image/...;base64,..."} | JSON string (floorplan_import writes a STRING)
+  floor_plan_bg:         unknown; // dict {floor: "data:image/...;base64,...", _align?: {floor: {x, y, w}}} |
+                                  // JSON string (installs from before jarvis/set_floor_background)
   floor_plan_bg_opacity: unknown; // _runtime_opt raw: "" (unset) | "0.35" (old panel wrote strings) | 0.35
   floor_plan_units:      string;  // "imperial" | "metric" (str()-coerced, default "imperial")
   floor_plan_sqft:       unknown; // "" | "1800" | 1800
@@ -115,11 +132,15 @@ interface EditorConfigSlice {
 `_get_runtime_json` (panel_data.py L119) returns the parsed object when the stored value is a dict/list or a
 parseable JSON string; when the string does NOT parse it returns the raw **string** (step 2) — so every
 `floor_plan_*` JSON key must be parsed through the tolerant `parseJsonish` rule of §3.2 (dict → use;
-string → `JSON.parse` or treat as empty). `floor_plan_bg` is the one key the **backend itself** writes as a
-JSON string (`floorplan_import._merge_background` → `json.dumps`), so a dict-or-string read is mandatory
-there even after this editor ships.
+string → `JSON.parse` or treat as empty). `floor_plan_bg` is the one key the **backend itself** writes
+(`jarvis/import_floorplan` and `jarvis/set_floor_background`, both through
+`floorplan_import.async_set_floor_background` → a **dict**); installs from before that path still hold the
+JSON **string** the old `_merge_background` produced, so a dict-or-string read stays mandatory.
 
-### 2.2 `jarvis/update_config` — write one setting (the only persistence path)
+### 2.2 `jarvis/update_config` — write one setting (every key except `floor_plan_bg`)
+
+Two commands persist editor data: `jarvis/update_config` for the plan keys and the immediate-save
+settings, and `jarvis/set_floor_background` (§2.4b) for `floor_plan_bg`, which is never written whole.
 
 Request (voluptuous, exact — `websocket.py` L1488):
 
@@ -155,7 +176,7 @@ exact JSON shape (types in §3):
 | `floor_plan_cameras` | json | `Record<FloorKey, CameraPin[]>` (incl. `coverage` results) | Save |
 | `floor_plan_entities` | json | `Record<FloorKey, EntityPin[]>` (`{e, x, y}` — the key is **`e`**) | Save |
 | `floor_plan_property` | json | `{points: Pt2[]}` (`{points: []}` when cleared) | Save |
-| `floor_plan_bg` | json | `Record<FloorKey, dataUrl>` — written one floor at a time with `jarvis/set_floor_background` (merged server-side) | immediately on upload / remove |
+| `floor_plan_bg` | json | `Record<FloorKey, dataUrl>` + `_align: Record<FloorKey, {x, y, w}>` — **not** sent through `update_config`: one floor at a time with `jarvis/set_floor_background` (§2.4b, merged server-side) | immediately on upload / remove / align |
 | `floor_plan_bg_opacity` | float 0..1 step 0.05 (default unset → treat as 0.2) | `number` | immediately on slider `change` |
 | `floor_plan_units` | enum `imperial`\|`metric` | `string` | immediately |
 | `door_mapping` | json | `Record<DoorSlot, entity_id>` — omit blank slots | immediately per select |
@@ -203,8 +224,44 @@ merges it into `floor_plan_bg[floor]` and writes the key itself (through the sam
 `jarvis/set_floor_background`, so a dict, mirrored into `runtime_config`; older installs may still hold a
 JSON **string**). The editor must therefore `refresh()` afterwards and re-read `floor_plan_bg` from the
 next snapshot (do not patch it locally with a guessed image). Errors: `import_failed` with messages
-`"<entity_id> is not available"` (no state) or `"couldn't read an image from <entity_id>"` (every fetch
-failed / image < 1024 bytes), or `str(exc)` for anything else.
+`"<entity_id> is not available"` (no state), `"couldn't read an image from <entity_id>"` (every fetch
+failed / image < 1024 bytes), `"'<floor>' is not a floor key"` (§2.4b floor rule), or `str(exc)` for
+anything else.
+
+### 2.4b `jarvis/set_floor_background` — set / remove ONE floor's background image and alignment
+
+Request (voluptuous, exact — `websocket.ws_set_floor_background`):
+
+```python
+{ vol.Required("type"): "jarvis/set_floor_background",
+  vol.Required("floor"): str,
+  vol.Optional("image"): vol.Any(str, None),    # a data:image/... URL sets it; null or "" removes it; absent keeps it
+  vol.Optional("align"): vol.Any(dict, None) }  # {x, y, w} in plan units sets it; null removes it; absent keeps it
+```
+
+Response `{floor: string, bytes: number, align: {x, y, w} | null}` (`FloorBackgroundResult` in
+`src/types.ts`): `bytes` is the length of the floor's stored image string (0 = none), `align` its stored
+alignment. Admin-only (`@websocket_api.require_admin`, pinned by `tests/unit/test_admin_gating.py`).
+
+Behaviour (`floorplan_import.async_set_floor_background`): validates, reads the current `floor_plan_bg`
+runtime-aware (runtime_config → config.json → entry; dict or legacy JSON string), merges **only** `floor`
+(`merge_floor_background`: other floors' images, other floors' `_align` entries and unknown keys are kept; an
+empty `_align` is dropped) and writes the dict through `config_apply.async_apply_many` (runtime_config,
+config.json, coordinator refresh, mirror signal). `align` is stored as floats `{x, y, w}` (other keys
+dropped). Why per floor: HA's websocket accepts at most 4 MiB per incoming frame, so the old whole-dict
+`update_config` write capped every floor's images together at that, and an alignment nudge resent them all.
+
+Errors: `invalid_format` (a `ValueError`; message = the reason): `'<floor>' is not a floor key` (a letter or
+digit first, then word characters / space / dot / hyphen, 64 at most; `_align` is reserved), `the image must
+be a data:image/... URL` (external URLs, `/api/` paths and other `data:` types are refused — every admin's
+panel would load them), `align must be {x, y, w} or null`, `align.<k> must be a finite number`, `align.w must
+be greater than 0`, `nothing to change: pass image and/or align`; `update_failed` (`str(exc)`) for anything
+else.
+
+The panel's client-side guard (`store.ts`): a message whose UTF-8 frame would exceed `WS_FRAME_LIMIT`
+(4 MiB − 8 KiB) is refused before sending with the status `This image is {size} MB; Home Assistant accepts
+at most {max} MB per image` (an image) or `This change is {size} MB; Home Assistant accepts at most {max} MB
+at once` (anything else, and every `update_config` write via `save()` / `writeSetting()`).
 
 ### 2.5 `jarvis/segment_floorplan_rooms` — detect room polygons in a vacuum map
 
@@ -281,7 +338,9 @@ A camera row may show a 96 px still: `await signPath(this.hass, "/api/camera_pro
 ### 2.9 Events the editor emits
 
 `jarvis-refresh` after every successful write (so the Residence view and the snapshot catch up),
-`jarvis-navigate {view: "residence"}` from the Back button. Nothing else.
+`jarvis-navigate {view: "residence"}` from the Back button and `jarvis-navigate {view: "residence",
+path: "editor/<tab>"}` from a sub-tab chip (both through `JarvisView.navigate`), and `hass-more-info`
+for a pin (§2.8). Nothing else.
 
 ### 2.10 Fixtures (harness + smoke)
 
@@ -289,16 +348,19 @@ A camera row may show a 96 px still: `await signPath(this.hass, "/api/camera_pro
 * `jarvis_import_floorplan.json`: `{"floor": "1f", "entity_id": "image.roborock_s7_map", "bytes": 48213}`
 * `jarvis_segment_floorplan_rooms.json`: `{"ok": true, "count": 2, "rooms": [{"name": "Room 1", "x": 2.0, "y": 2.0, "w": 60.0, "h": 38.5, "type": "room", "points": [[2.0,2.0],[62.0,2.0],[62.0,40.5],[30.0,40.5],[30.0,28.0],[2.0,28.0]]}, {"name": "Room 2", "x": 30.5, "y": 28.5, "w": 31.5, "h": 22.0, "type": "room", "points": [[30.5,28.5],[62.0,28.5],[62.0,50.5],[30.5,50.5]]}]}`
 * `jarvis_compute_camera_coverage.json`: `{"covered": ["Living Room"], "reason": "Sees most of the Living Room and a corner of the Downstairs Hallway.", "source": "llm", "ts": 1761700000}`
+* `jarvis_set_floor_background.json`: `{"floor": "1f", "bytes": 64412, "align": null}` — the mock
+  (`dev/mock-hass.ts`) echoes the request on top of it: `floor` from the message, `bytes` = the sent image's
+  length (0 for null) when `image` was sent, `align` = the sent value when `align` was sent.
 * `panel_data.json` (shared; additive): under `config` set `floor_plan_rooms` to `DEFAULT_PLAN` with
   `"Living Room"` given a 6-point `points` polygon, `floor_plan_elements` `{"1f": [{"id":"e1","type":"window","kind":null,"wall":"front","pos":0.3,"w":20,"entity":""},{"id":"e2","type":"door","kind":"exterior","wall":"front","pos":0.62,"w":18,"entity":"binary_sensor.front_door"},{"id":"e3","type":"door","kind":"interior","wall":"left","room":"Kitchen","pos":0.5,"w":16,"entity":""}], "2f": [{"id":"e4","type":"dormer","slope":"front","pos":0.35,"entity":""}]}`,
   `floor_plan_cameras` `{"1f": [{"id":"c1","x":230,"y":112,"angle":270,"fov":90,"range":55,"entity":"camera.living_room","indoor":true,"coverage":{"covered":["Living Room"],"reason":"Sees most of the Living Room.","source":"geometry","ts":1761700000}}]}`,
   `floor_plan_entities` `{"1f": [{"e":"binary_sensor.front_door","x":210,"y":120}]}`,
   `floor_plan_property` `{"points": [[-120,-110],[440,-110],[440,260],[-120,260]]}`, `floor_plan_bg` `{}`,
-  `floor_plan_bg_opacity` `0.2`, `floor_plan_units` `"imperial"`, and fix `door_mapping` to the backend's
-  orientation `{"front": "binary_sensor.front_door", "garage_1": "cover.garage_door"}` (the current fixture is
-  reversed — §10 R11). Keep every other key.
+  `floor_plan_bg_opacity` `0.2`, `floor_plan_units` `"imperial"`, and `door_mapping` in the backend's
+  orientation `{"front": "binary_sensor.front_door", "garage_1": "cover.garage_door"}` (§10 R11). Every
+  other key is kept (including the harness-only `floor_plan_address`, §10 R12).
 
-The mock answers `jarvis/update_config` with `{}` and does not persist, so a saved plan snaps back on the
+The mock answers `jarvis/update_config` with `{}` (`jarvis_update_config.json`) and does not persist, so a saved plan snaps back on the
 next refetch in the harness; the editor's dirty-vs-snapshot rule (§4.8) must not fight that (it keeps the
 local doc while dirty; after a save it adopts the next snapshot — which in the harness is the old plan;
 that is the mock, not a bug).
@@ -410,7 +472,9 @@ parseDoc(config): { doc: EditorDoc; configured: boolean; warnings: string[] }
 * `floor_plan_entities` → per floor array; rows without a string `e` are dropped.
 * `floor_plan_property` → `{points}` when `points` is an array of ≥ 3 pairs, else `{points: []}`.
 * `floor_plan_bg` → `Record<string,string>` (dict or JSON string; only string values that start with
-  `data:` or `/` or `http` are kept).
+  `data:` or `/` or `http` are kept — the `_align` entry is a dict, so it never shows up as a floor).
+  The alignment is read separately (`import-layers.ts parseAlign`): `_align[floor]` = `{x, y, w}` with finite
+  numbers, `w > 0`; anything else = not calibrated (the image is drawn over the floor's content bbox).
 * `floor_plan_bg_opacity` → `num()`; if not finite or outside 0..1 → `0.2`.
 * `floor_plan_units` → `=== "metric" ? "metric" : "imperial"`.
 * `door_mapping` → dict of string → string, dropping non-string values.
@@ -507,18 +571,21 @@ Ported from the old `_entMarkerStyle`, colours replaced by badge levels: `sensor
 ### 4.1 Component tree
 
 ```
-<jarvis-view-residence>  (subPath === "editor")
-  └─ <jarvis-floorplan-editor .hass .narrow .data>       editor.ts — owns EditorDoc, history, dirty, save, sub-tab state, floor
-       ├─ toolbar (floor pills · undo/redo · fit · 3D preview toggle · Save)
-       ├─ <jv-plan-canvas .doc .floor .units .bg .bgOpacity .selection .mode .hass @plan-change @plan-select @plan-context @plan-open-entity>
-       ├─ inspector (selection-dependent form)            editor.ts
-       ├─ sub-tabs: Rooms · Openings · Doors · Cameras & pins · Import    tabs/*.ts (each gets .doc .floor .units .hass .config and emits plan-change / config-write)
-       └─ 3D preview (collapsible)                         renderSVG(planToFeet(serializeRooms(doc)), …)
+<jarvis-view-residence>  (subPath "editor" or "editor/<tab>")
+  └─ <jarvis-plan-editor .hass .narrow .data .route>    editor.ts — owns the EditorStore (doc, history, dirty, save, floor, tab, selection, toasts)
+       ├─ header (Back · title · dirty badge · floor pills · undo/redo · snap · fit · preview · units · Discard · Save)
+       ├─ <jv-plan-canvas .store .hass ?narrow>          canvas.ts — layers registered by the tab modules (registerLayer)
+       ├─ sub-tab chips (role=tablist): Rooms · Openings · Doors · Cameras & pins · Import   → navigate("residence", "editor/<tab>")
+       ├─ side card: the active tab element <jarvis-editor-{rooms|openings|doors|pins|import} .store .canvas .hass .narrow>
+       │    (each tab renders its own inspector for the selection + its tools and lists)
+       └─ 3D preview (collapsible)                       renderSVG(docToFeet(doc), docElementsToFeet(doc, hass), …)
 ```
 
-`plan-change` carries `{ label: string; apply: (doc: EditorDoc) => void; transient?: boolean }`: the editor
-clones the doc (`structuredClone`), applies, pushes a history entry unless `transient` (drag frames), and
-re-renders. All mutation goes through this one path, so undo/redo and dirty tracking are automatic.
+Every mutation goes through `store.change(label, apply, {transient?, coalesce?})` /
+`store.changeWith(apply → label | null)`: the store clones the doc, applies, pushes a history entry unless
+`transient` (drag frames), recomputes dirty and notifies its subscribers (microtask-batched). Unhandled canvas
+context requests bubble as a `plan-context` CustomEvent. Undo/redo and dirty tracking are therefore
+automatic.
 
 ### 4.2 Canvas layers (`<jv-plan-canvas>`, one `<svg>`)
 
@@ -528,10 +595,12 @@ bottom to top, each a `<g data-layer>`:
 1. **grid** — `<pattern>` 10 u minor / 50 u major using `--jv-border` (minor at `opacity .35`) and axis
    labels every 50 u (`--jv-text-3`, font-size 3 u). Pattern and label rects span the *current* viewBox
    (negative coordinates included).
-2. **background** — `<image href=${bg[floor]} x y width height opacity=${bgOpacity}
-   preserveAspectRatio="xMidYMid meet">` placed over the **content bbox** of the floor (or `0 0 320 150`
-   when empty); `pointer-events: none`. (Old code stretched it over the viewBox, so it moved when zooming —
-   fixed here; §10 R6 notes that a stored image has no calibration.)
+2. **background** — `<image href=${bg[floor]} … opacity=${bgOpacity}>`, `pointer-events: none`. With a
+   stored alignment (`_align[floor] = {x, y, w}`) it is drawn at `x, y`, `w` wide and `w × naturalHeight /
+   naturalWidth` high (`preserveAspectRatio="none"`); without one it is placed over the **content bbox** of
+   the floor (or `0 0 320 150` when empty) with `preserveAspectRatio="xMidYMid meet"`. (Old code stretched it
+   over the viewBox, so it moved when zooming — fixed here.) The Import tab's **Align on the plan** tool
+   (`bg-align`) draws the image with a move/scale handle while active.
 3. **ghost** — the floor directly below (`2f → 1f`, `1f → bsmt`), enclosed rooms only (type ≠ outdoor), as
    dashed `--jv-danger` outlines at `opacity .45` plus the caption `↓ {floor} below (stay within)`;
    `pointer-events: none`.
@@ -681,7 +750,13 @@ Selection changes are announced through an `aria-live="polite"` region (`{name} 
   doc (another client or an import changed it). If `dirty` and it differs → keep the local doc and show
   the banner `The plan changed elsewhere.` with `Reload` (discard local) / `Keep mine` (dismiss until the
   next difference). Immediate-save keys (bg, opacity, units, door mapping, house keys) always come from
-  the latest snapshot, overlaid by an in-flight optimistic value while the write is pending.
+  the latest snapshot, overlaid by an in-flight optimistic value while the write is pending. Writes
+  to one key may overlap (the opacity slider's `change` again before the first answer): only the
+  latest one started sets the key's status or reverts it, and a failing latest write goes back to the
+  last value a write confirmed (or to the snapshot's when none did) - never to whatever overlay it saw
+  when it started, which may be an earlier write the backend refused. Background writes patch one
+  floor each, so they are independent: every confirmed floor folds into the confirmed dict whatever
+  order the answers arrive in, and the floors still in flight stay shown on top of it.
 * `dirty = serializeAll(doc) !== baseline` (recomputed after every change; so undoing back to the baseline
   clears it).
 * **Save** (toolbar, `Ctrl/⌘+S`): for each of the five keys whose serialised value differs from the
@@ -747,20 +822,24 @@ Page (the Residence view renders only the editor when `subPath === "editor"`; no
   what the background context menu offers): Rooms → room handles + property handles; Openings → markers
   draggable, rooms select-only; Doors → canvas read-only with mapped slots highlighted (front/garage
   markers pulse once); Cameras & pins → camera and pin handles; Import → detected-room review overlay.
-  Deep link: `/jarvis/residence/editor` only — sub-tabs are not in the URL (state in memory; the
-  Residence view's route is a single segment).
+  Deep link: `/jarvis/residence/editor/<tab>` — the active sub-tab **is** in the URL (a chip click or
+  `←`/`→`/`Home`/`End` on the tablist calls `navigate("residence", "editor/<tab>")`; the store's `tab`
+  follows the route); `/jarvis/residence/editor` alone opens Rooms.
 * **Inspector** forms (all `ha-textfield`/`ha-select`/`ha-switch` with fallbacks; labels visible):
   * Room: Name (text + area datalist, with the hint `Use the Home Assistant area name so occupancy lights
-    this room`), Type (select: Room, Bathroom, Stairs, Door, Outdoor zone), Width / Depth (number, real
+    this room`), Type (select: Room, Bathroom, Stairs, Door, Outdoor zone), Floor (select: moves the room to
+    another floor), Width / Depth (number, real
     units, step 0.5, min 1 — disabled for polygons, which show `{n} corners` and `Convert to rectangle`),
     X / Y (number, real units), `Reshape (edit corners)` (rect) , `Duplicate`, `Delete` (danger).
     A room named like `/garage/i` on `1f` shows the hint `The 3D model gives this room the garage roof.`
   * Opening (when a marker is selected; same form as the Openings tab row).
   * Camera: entity select, Aim (range 0..359 + numeric), FOV (range 20..170 step 5), Range (number in
     real units, min 1, step 1), Indoor/Outdoor segmented toggle, coverage readout, `Compute coverage`,
-    `Delete`.
+    `Delete`. On the canvas the selected camera (Cameras & pins tab) also gets an **aim knob** at the end
+    of its cone: drag it to set direction and range; arrow keys on the focused knob rotate it.
   * Pin: entity (read-only), live state badge, `Open controls`, `Remove`.
-  * Property vertex: index, `Remove corner`.
+  * Polygon corner / property vertex: `Corner {i} of {name}` / `Property corner {i}`, X / Y (real
+    units), `Remove corner` (disabled at 3 corners), `Done`.
   * Nothing selected: the Rooms tab's "House" disclosure (house-shape keys) when Rooms is active, else a
     one-line hint.
 * **Sub-tab contents** (right column / below canvas):
@@ -770,8 +849,11 @@ Page (the Residence view renders only the editor when `subPath === "editor"`; no
     matches no area; click selects + scrolls the canvas to it); and the collapsible **House** section: Home
     style (select, `STYLES` labels), Stories (`1`, `1.5`, `2`, `3`), Basement (switch), Front dormers
     (0–3), Rear dormers (0–2), Garage bays (0–4), Chimney side, Chimney count (1–4), Basement entrance,
-    Bedrooms, Bathrooms, Square footage (blank = estimate), Units (Imperial ft / Metric m). Each saves
-    immediately with the Settings view's row status (saving → saved → fades; error inline + revert).
+    Bedrooms, Bathrooms, Square footage (blank = estimate), Units (Imperial ft / Metric m — the same
+    toggle also sits in the editor header on wide screens). Each saves immediately with the Settings
+    view's row status (saving → saved → fades; error inline + revert). While a draw tool is active the
+    tools row offers `Finish` / `Remove last corner` / `Cancel` (touch has no Enter / Esc); on narrow it also
+    carries `Snap` and `Fit`, which the header hides there.
   * **Openings**: add buttons `+ Window`, `+ Interior window`, `+ Exterior door`, `+ Balcony door`,
     `+ Cellar door`, `+ Interior door`, `+ Cased opening`, and on `2f` `+ Front dormer`, `+ Rear dormer`;
     the list (`<ul>`), each row: type badge, Room (select, only for interior/cased/french and interior
@@ -779,7 +861,8 @@ Page (the Residence view renders only the editor when `subPath === "editor"`; no
     Position (range 0..1 step 0.02 with the value as %), Width (number real units, hidden for dormers),
     Sensor (select §3.9; replaced by the text `open passage · no sensor` for cased), Remove. Hover/focus on
     a row highlights its marker (`.is-glow`), and vice-versa.
-  * **Doors**: the slot grid (`<fieldset>`), one `ha-select` per slot (§3.7) with the auto-detect option
+  * **Doors**: the slot grid (`<fieldset class="slots">`), one `<jv-picker>` per slot (§3.7) over the
+    `binary_sensor` / `cover` / `lock` candidates, with the auto-detect option
     and the current live state badge next to it (`Open`/`Closed` from `data.doors[slot]` for backend
     slots, from the entity for `garage_<n>`); the help line; "Other mapped slots" when present. Each
     change saves `door_mapping` immediately (whole dict).
@@ -791,12 +874,18 @@ Page (the Residence view renders only the editor when `subPath === "editor"`; no
     button; the tip `add a device, then drag its pin on the plan · tap a pin to open its controls`.
   * **Import**: cards stacked — **Map / vacuum entity** (select from §2.3 + `Import as background` +
     `Detect rooms`, span field hidden under "Advanced"), **Background image** (file input `accept="image/*"`,
-    current floor's thumbnail, Opacity slider 0–1 step 0.05 with %, `Remove background`), **SweetHome3D**
+    current floor's thumbnail, Opacity slider 0–1 step 0.05 with %, `Remove background`, and an
+    **Alignment** disclosure — `· calibrated` when stored — with Left / Top / Image width in real units,
+    the derived image height, `Align on the plan` (drag to move, corner handle to scale; arrows nudge,
+    Page Up / Page Down scale, Enter finishes, Escape cancels; `Done` / `Cancel` buttons) and
+    `Reset alignment`), **SweetHome3D**
     (file input `.sh3d,.xml,.json`, options, preview summary, `Add to plan` / `Replace plan`), **Plan file**
     (`Export JSON`, `Import JSON…` with `include background images` checkbox on export), **Reset**
     (`Reset to sample plan`, danger). The **detected-rooms review** (after `Detect rooms`) shows the
     candidates as a dashed overlay on the canvas with a checklist (name editable inline, checkbox) and
-    `Add selected` / `Cancel`; candidates are not part of the doc until added.
+    `Add selected` / `Replace rooms on {floor}` (when the floor already has rooms; confirmed) / `Cancel`;
+    tapping a candidate on the plan includes / skips it and dragging any of them moves the whole layout;
+    candidates are not part of the doc until added.
 
 ---
 
@@ -886,12 +975,13 @@ optional `Undo` button.
 | I4 | Review `Add selected` | push the checked rooms (names as edited) to the current floor | – | no | toast `Added {n} rooms` |
 | I5 | Background file chosen | read → downscale to ≤ 1600 px on the long side (canvas), PNG if the source is PNG/has transparency else JPEG q 0.85, refuse results > 1.5 MB (`Image too large after compression — use a smaller image`); write that floor only | `jarvis/set_floor_background {floor, image}` (was `jarvis/update_config` with the whole dict, which capped all floors' images together at HA's 4 MiB frame) | existing background → `Replace the background of {floor}?` | toast `Background image set for {floor}`; error `Image import failed — {message}` |
 | I6 | Opacity slider `change` (`input` previews live) | write number | `jarvis/update_config {key:"floor_plan_bg_opacity", value}` | no | `%` label |
-| I7 | `Remove background` | remove the floor's image and alignment | `jarvis/set_floor_background {floor, image: null, align: null}` | `Remove the background image of {floor}?` destructive | toast |
+| I7 | `Remove background` | remove the floor's image and alignment | `jarvis/set_floor_background {floor, image: null, align: null}` | `Remove the background image of {floor}?` destructive | toast `Background image removed from {floor}` |
+| I7b | Alignment fields `change` / `Align on the plan` → `Done` / `Reset alignment` | store that floor's `{x, y, w}` (1 decimal; `w ≥ 5` u) or remove it (the image falls back to the content bbox) | `jarvis/set_floor_background {floor, align}` / `{floor, align: null}` — no image travels | no | toast `Background aligned on {floor}` / `Background fitted to the rooms again`; error `Image import failed — {message}` |
 | I8 | SweetHome3D file chosen | parse (§6.1) → summary (`{n} rooms on {m} levels`, level → floor mapping selects, options) | – | no | `ha-alert error` for unreadable files with the §6.1 messages |
 | I9 | SweetHome3D `Add to plan` / `Replace plan` | convert with the chosen options; merge (append rooms per mapped floor) or replace `doc.floors` rooms entirely (openings/cameras/pins kept) | – | Replace: `Replace every room on every floor?` destructive | toast `Imported {n} rooms — review, then Save`; floor switches to the first imported floor |
 | I10 | `Export JSON` | download `jarvis-floor-plan.json` (§6.2) via Blob + `<a download>` | – | no | toast `Floor plan exported` |
-| I11 | `Import JSON…` | parse (§6.2): bundle → load every section into the doc (bg handled separately: offered as I5 writes per floor after confirmation), legacy plan → rooms only | – | bundle with backgrounds → `Also import {n} background images? They save immediately.` | toast `Layout imported — review, then Save`; invalid → `Invalid layout file — {reason}` |
-| I12 | `Reset to sample plan` | write `floor_plan_rooms = {}`; local doc reparsed (default plan, `configured = false`); openings/cameras/pins/property untouched | `jarvis/update_config {key:"floor_plan_rooms", value: {}}` | `Reset the floor plan to the sample home? Your rooms are removed; openings, cameras and pins stay.` destructive | toast `Floor plan reset to the sample home`; `refresh()` |
+| I11 | `Import JSON…` | parse (§6.2): bundle → load every section into the doc (bg handled separately: offered as I5 writes **one floor per `set_floor_background` message** after confirmation, the floors that failed are reported), legacy plan → rooms only | – | units / door mapping in the file → `Also apply the units and door mapping from the file? They save immediately.`; backgrounds → `Also import {n} background images? They save immediately.` | toast `Layout imported — review, then Save` + Undo; partial background failure → `Imported {done} of {n} background images; {floors} failed — {message}`; entries that are not inline floor images → `Skipped {n} background entries that are not inline floor images of this home`; invalid → `Invalid layout file — {reason}` |
+| I12 | `Reset Default` (disabled while the plan is dirty: `Save or discard your unsaved changes first.`) | write `floor_plan_rooms = {}`; local doc reparsed (default plan, `configured = false`); openings/cameras/pins/property untouched | `jarvis/update_config {key:"floor_plan_rooms", value: {}}` | `Reset the floor plan to the sample home? Your rooms are removed; openings, cameras and pins stay.` destructive | toast `Floor plan reset to the sample home`; `refresh()` |
 
 #### 6.1 SweetHome3D conversion (port of `scripts/sweethome3d_to_floorplan.py`, in the browser)
 
@@ -957,10 +1047,13 @@ rooms only, the old `Export` output and the SweetHome3D script's output), or a p
 | Import / detect / coverage in flight | the button | label with ellipsis, disabled; a second click ignored |
 | Detected-room review | canvas overlay + Import tab list | dashed `--jv-info` polygons, checklist |
 | Coverage per camera | Cameras tab row | geometry line always; AI line when `coverage` present; `source: "geometry"` → prefix `(geometry)`; `ts` shown as relative time via `hass.locale` |
-| Background present | canvas layer 2; Import tab thumbnail | – ; `Remove background` enabled |
+| Background present | canvas layer 2; Import tab thumbnail | – ; `Remove background` enabled; Alignment disclosure (`· calibrated` when `_align[floor]` is stored; `This image can't be aligned (its size is unknown).` when the image's natural size cannot be read) |
+| Background write refused / failed | Import tab inline error | `This image is {size} MB; Home Assistant accepts at most {max} MB per image` (client-side frame check, nothing sent) or the `set_floor_background` error message |
 | Image too large / unreadable | Import tab inline error | §6 I5 messages |
 | `.sh3d` unsupported browser | Import tab inline warning | §6.1 message |
-| No admin (`hass.user.is_admin === false`) | whole editor | the panel is admin-only; still render `jv-empty kind="error"` `Administrator access is required to edit the floor plan.` if a write returns `unauthorized` |
+| No admin (`hass.user.is_admin === false`) | Save error banner | the panel is admin-only; when a save returns `unauthorized` the save-error banner reads `Administrator access is required to edit the floor plan.` (with Retry / Dismiss) instead of `Save failed — {message}` |
+| Parse warnings | above the grid | `<details>` `Plan warnings ({n})` listing `parseDoc` warnings |
+| Keyboard focus after a removal | lists, toasts | a row's Remove (Openings rows, Doors "Other mapped slots", camera rows and the camera form's Delete, pin chips, toasts' Undo / Dismiss) goes through `keepRowFocus()` (`src/focus.ts`, DESIGN.md §8): focus moves to the same control in the **next** row, else the **previous** row, else a fallback — Openings: the first add button; Cameras: `+ Camera`; Pins: the add picker; Doors: the "Other mapped slots" heading, else the slot grid (`fieldset.slots`, `tabindex="-1"`); toasts: the selected editor tab. A polygon's `Remove corner` focuses the room inspector heading (`#insp-h`), a lot corner's the plan. An object removed on the canvas leaves focus on the plan (`canvas.focusSurface()`). A removal that waits for the backend (Doors: the `door_mapping` write disables the row controls while it saves) hands its Promise to `keepRowFocus()`, and focus is placed once it settles — on the same row's control again if the write failed and the row came back. Focus only moves when the control had it and it has since fallen to `<body>`; the smoke test asserts first / last / only row. A toast holds its 4 s auto-dismiss while focus is inside it (`store.holdToast`); the hold ends on focusout, and after every editor update for a held toast that no longer contains the focus (its focused Undo was stripped by a re-render: focus fell to `<body>`, which some browsers announce with no focusout) |
 | Reduced motion | marker glow / pulse | no transitions beyond 200 ms; no pulse |
 | Narrow | §5 | sticky bottom bar; inspector under canvas |
 
@@ -970,6 +1063,8 @@ fallback; every entity name through the safe-name helper.
 ---
 
 ## 8. Strings
+
+**Phase 3 status:** every panel key is now translated in all 22 language files (`frontend/i18n-missing.json` reports nothing missing; `npm run i18n:report` regenerates it). The de.json / ✓ / ✗ columns below record what existed before the port; the code's `t()` keys (`npm run i18n:keys`) are authoritative where they differ from this list.
 
 All through `t()`. Column *de* = present in `custom_components/jarvis/frontend/i18n/de.json` today (✓ keeps
 the existing translation if the English is kept byte-for-byte; ✗ new key to translate in one pass). Keys
@@ -1086,7 +1181,7 @@ translated. `{floor}` in toasts should be the floor **label** (`t("1st Floor")`)
 | Address / location (`floor_plan_address`) | no writable key exists for it (§10 R12) |
 | Writing `floor_plan_sqft` from the plan estimate | the Residence view estimates it when blank; the field here is the manual override only |
 | Area registry sync (creating HA areas from rooms) | needs HA's area registry WS commands and admin flows beyond this panel |
-| Server-side image calibration / georeferencing of vacuum maps | the backend stores the image only; alignment is manual (§10 R6) |
+| Server-side image calibration / georeferencing of vacuum maps | the backend stores the image and the manual per-floor alignment only (§10 R6) |
 | A shared toast component | DESIGN.md: shared components are frozen; the editor ships its own `role="status"` strip (noted in panel.md as a Phase 3 nice-to-have) |
 | Native `prompt()` / `confirm()` dialogs the old editor used | replaced by `confirmDialog` and an inline name dialog |
 | HUD styling, Orbitron/JetBrains fonts, literal colours, scanlines | design mandate |
@@ -1095,21 +1190,24 @@ translated. `{floor}` in toasts should be the floor **label** (`t("1st Floor")`)
 
 ## 10. Risks / ambiguities
 
-1. **Shared-file edits.** Mounting at `/jarvis/residence/editor` needs a 5-line change in
-   `src/views/residence.ts` (owned by the residence agent) and an additive fixture change in
-   `dev/fixtures/panel_data.json`. Keep both minimal and call them out in the hand-over. The smoke test
-   (`scripts/smoke.mjs`, scaffold-owned) visits `/<key>` only, so the editor route is **not** exercised by
-   CI — the builder must at least import `editor.ts` from `residence.ts` so its CSS is adopted and linted
-   (the smoke test lints all adopted styles), and should visit the route manually in the harness
-   (`http://localhost:5173/jarvis/residence/editor`) in light, dark and narrow.
+1. **Shared-file edits.** Mounting at `/jarvis/residence/editor` is a small change in
+   `src/views/residence.ts` (it imports `editor.ts`) plus an additive fixture block in
+   `dev/fixtures/panel_data.json`. The smoke test (`scripts/smoke.mjs`) exercises the editor: every sub-tab
+   route `/residence/editor/<tab>` in light and dark (element mounted, canvas draws the floor's rooms, clean
+   after load, no error state, adopted styles linted), a store round trip (add a room, undo, redo, save →
+   exactly `floor_plan_rooms` is written, reload adopted silently), the per-floor background writes (§2.4b),
+   the keyboard focus after Remove (§7) and the model self-test (`selftest.ts`). Narrow layouts are still
+   checked by hand in the harness (`http://localhost:5173/jarvis/residence/editor/<tab>`).
 2. **Payload size of `floor_plan_bg`.** Backgrounds are base64 data URLs inside config.json **and**
    inside every `get_panel_data` snapshot (every 20 s, for every open panel). The old panel uploaded files
-   untouched. The client-side downscale/compress rule (I5, ≤ 1600 px, ≤ 1.5 MB) bounds the panel's part;
+   untouched. Writes travel one floor per `jarvis/set_floor_background` message, so the 4 MiB websocket frame
+   limits each image, not all of them together. The client-side downscale/compress rule (I5, ≤ 1600 px,
+   ≤ 1.5 MB) bounds the panel's part;
    the backend import path (`import_floorplan`) stores whatever the entity serves — a large vacuum map
    still bloats the snapshot. A backend follow-up (serve backgrounds through a signed `/api/jarvis/...`
    view instead of inlining) is recommended but out of this spec.
-3. **String vs dict persistence.** The editor writes dicts; `floorplan_import` writes strings; older
-   installs hold strings. Every reader tolerates both today, and `_get_runtime_json` returns the raw string
+3. **String vs dict persistence.** The editor and `floorplan_import` (`async_set_floor_background`) write
+   dicts; older installs hold strings. Every reader tolerates both today, and `_get_runtime_json` returns the raw string
    when a stored string is not JSON — the parser treats that as unset. Any new backend reader must keep the
    `isinstance(raw, str) → json.loads` guard; `tests/unit/test_floorplan_import.py` and
    `test_residence_graph.py` already pin the tolerant behaviour.
@@ -1119,10 +1217,11 @@ translated. `{floor}` in toasts should be the floor **label** (`t("1st Floor")`)
 5. **Leaving with unsaved changes.** The panel's tab bar and HA's sidebar navigate without asking; only
    `beforeunload` (reload/close) and the editor's own Back button can prompt. A future `jarvis-before-navigate`
    hook in `panel.ts` would close the gap; until then the dirty badge + sticky Save are the mitigation.
-6. **Background alignment.** A background image (upload or vacuum map) carries no scale; it is drawn over
+6. **Background alignment.** A background image (upload or vacuum map) carries no scale of its own: until a
+   floor is aligned (`_align[floor] = {x, y, w}`, set numerically or with `Align on the plan`) it is drawn over
    the floor's content bbox (or `0 0 320 150`), so rooms detected from the same map (which the backend scales
-   to `target_span` from its own origin) will **not** line up with the image. Expect users to drag the
-   detected block into place; a future "calibrate image" (two-point scale) is noted as follow-up.
+   to `target_span` from its own origin) will **not** line up with it. Users align the image and/or drag the
+   detected block into place; a two-point "calibrate from a known distance" remains a follow-up.
 7. **`garage_<n>` slots are client-only** (residence.md §9.5): `door_state.DOOR_SLOTS` lacks them, so
    `data.doors` never reports per-bay state; the Doors tab reads the mapped entity's state directly for
    those rows. If the backend ever adds them, nothing here changes.
@@ -1134,9 +1233,10 @@ translated. `{floor}` in toasts should be the floor **label** (`t("1st Floor")`)
 10. **Opening anchor inconsistency inherited from the old code**: french/balcony doors are room-anchored
     for the marker (`markerRect`) but floor-anchored for the coverage gap (`planGeometry`). Ported as-is
     for fidelity with the 3D renderer; flag for a later backend/renderer review rather than silently fixing.
-11. **Fixture `door_mapping` is reversed** in `dev/fixtures/panel_data.json` (`{entity: slot}`); the backend
-    contract is `{slot: entity}` (`door_state.get_door_states` iterates `mapping.items()` as `slot, eid`). Fix
-    the fixture (§2.10). `test_panel_data_doors.py` covers the backend, not the fixture.
+11. **Fixture `door_mapping` orientation**: the backend contract is `{slot: entity}`
+    (`door_state.get_door_states` iterates `mapping.items()` as `slot, eid`); the fixture was reversed
+    (`{entity: slot}`) and has been fixed (§2.10). `test_panel_data_doors.py` covers the backend, not the
+    fixture.
 12. **`floor_plan_address`** exists in the harness fixture but in no backend file (not in
     `PANEL_WRITABLE_KEYS`, not in the catalogue, not emitted by `ws_get_panel_data`). The Residence banner's
     "ADDRESS NOT SET" has no setter; nothing in the editor should pretend otherwise.

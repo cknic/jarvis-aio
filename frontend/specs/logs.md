@@ -5,10 +5,14 @@ Derived from the OLD panel (`custom_components/jarvis/frontend/jarvis-panel.js`)
 panel scattered elsewhere — the Activity Feed (old dashboard), System Diagnostics
 (old Settings › General), Cognitive Core stats (old dashboard status card) and
 Governance / enforcement switches (old Settings › Governance, the "shadow → parity →
-enforce" control surface). The view agent implements from THIS document only.
+enforce" control surface — on this view a **read-only summary**; the switches are written
+in Settings › Governance, settings-tools.md §4.12). The view agent implements from THIS
+document only.
 
-Route: `/jarvis/logs` (panel `route.path === "/logs"`). Admin-only panel; every command
-below is `@websocket_api.require_admin`.
+Route: `/jarvis/logs` (panel `route.path === "/logs"`); element `<jarvis-view-logs>`
+(`src/views/logs.ts`) with one element per card in `src/views/logs/` (`jv-logs-system`,
+`jv-logs-activity`, `jv-logs-diagnostics`, `jv-logs-cognitive`, `jv-logs-governance`).
+Admin-only panel; every command below is `@websocket_api.require_admin`.
 
 ---
 
@@ -23,9 +27,12 @@ One place for an admin to answer "what has JARVIS been doing, and is it healthy?
 3. **Diagnostics** — health of the core services JARVIS calls (LLM, embeddings, TTS,
    STT, cameras, routines, DB, scheduler, host) plus judgment calibration.
 4. **Cognitive Core** — learning statistics and last pattern-analysis result.
-5. **Governance** — the kernel enforce kill-switches, with read + confirmed toggle.
+5. **Governance** — a read-only summary of the kernel enforce kill-switches (how many
+   are ON, which are away from their shipped default) with a **Change in Settings** link.
 
-No navigation into other views is required; the view is self-contained.
+The only navigation out of the view is that link (`jarvis-navigate {view: "settings",
+path: "governance/tool:governance"}` → `/jarvis/settings/governance/tool:governance`,
+which opens Settings › Governance and flashes the governance tool card).
 
 ---
 
@@ -240,16 +247,19 @@ Response:
   }>
 }
 ```
-- Order: registry order — capabilities first, then safety rungs. Current registry (10):
-  capability: `continuity_resume` (default OFF), `agency_orchestration` (ON),
-  `knowledge_graph` (ON); safety: `authority`, `agency_budget`, `loop_detect`,
-  `safety_seam`, `hazard_situation`, `intrusion_gate`, `delivery_situation` (all ON).
-  Do NOT hard-code these; render whatever comes back.
+- Order: registry order (`enforcement.py`'s switch list, returned by
+  `enforcement.current()`) — capabilities first, then safety rungs. The registry grows
+  whenever the kernel gains a rung (recent additions include
+  `situation_autonomy_suppress` and `intrusion_situation`), so this spec deliberately
+  does not enumerate it: `jarvis/get_enforcement` is the only source of truth. Do NOT
+  hard-code keys, names or counts; render whatever comes back, grouped by `category`.
 - Error: `code: "enforcement_failed"`.
-- Fetch: on view enter and after every successful `set_enforcement`; also on manual
-  Refresh. No polling needed.
+- Fetch: on view enter and on manual Refresh. Not part of the 20 s poll.
 
-### 7. `jarvis/set_enforcement` — toggle one switch
+### 7. `jarvis/set_enforcement` — toggle one switch (NOT called by this view)
+
+Documented for reference: the only caller is Settings › Governance
+(`<jarvis-tool-governance>`, settings-tools.md §4.12), which owns the confirmations.
 
 Request:
 ```
@@ -272,6 +282,7 @@ Response:
 - `hass.callService`: **none**. The old Logs tab, Governance card, Diagnostics card,
   Cognitive stats and Activity feed call no HA services.
 - `jarvis/update_config`: **no keys written** from any of these cards.
+- `jarvis/set_enforcement`: not sent from this view (see §7).
 - `auth/sign_path` / snapshot images: not used.
 
 ---
@@ -367,23 +378,24 @@ except Diagnostics, which has its own button) and a "Last updated HH:MM:SS" capt
 - If the payload carries `error`, show it as secondary text under the grid (do not
   treat as a failed request).
 
-### Card E — Governance
+### Card E — Governance (read-only summary)
 - Header: "Governance"; right badge "Enforcement".
-- Intro text (verbatim from old panel): `JARVIS's kernel brings each capability online
-  along a shadow → parity → enforce ladder, each behind a kill-switch. Here you control
-  those switches: the opt-in capabilities ship OFF (enable when you're ready), and the
-  live safety guards ship ON (leave them on). Changes take effect immediately and
-  survive a restart.`
-- Two groups, each only when non-empty:
-  1. `category === "capability"` → heading "Owner opt-in capabilities", sub-text
-     `These ship OFF. Turning one ON makes the kernel authoritative for that capability
-     — your choice, behaviour-changing.`
-  2. `category === "safety"` → heading "Safety & governance — kill-switches (keep ON)",
-     sub-text `These ship ON and guard autonomous behaviour. Turning one OFF reverts
-     that guard to observe-only (log-only) — only for debugging.`
-- Each switch row: `name` (bold) + small muted `phase` tag (if non-empty) + small
-  warning-coloured "overridden" tag when `overridden`; `explanation` as secondary text;
-  an `ha-switch` (or a toggle button labelled ON/OFF) on the right reflecting `enabled`.
+- Intro text: `The kernel's enforcement kill-switches, read-only here. Turn them on or off
+  in Settings › Governance.`
+- A count list, one row per group that is non-empty, each with a badge
+  `{on} of {total} ON`:
+  1. `category === "capability"` → label "Owner opt-in capabilities" (neutral badge).
+  2. `category === "safety"` → label "Safety & governance — kill-switches (keep ON)"
+     (`ok` badge when every safety switch is ON, `warn` when any is OFF).
+  3. Always: "Owner overrides" with the number of switches whose `overridden` is true
+     (`warn` badge when > 0, else neutral).
+- Then either `Not at the shipped default:` followed by a list of every switch whose
+  `enabled !== default` — `{name} — ON|OFF (default: ON|OFF)` — or, when there is none,
+  `Every switch is at its shipped default.`
+- No toggles, no per-switch explanation/phase rows on this card (those live in
+  Settings › Governance).
+- Footer button **Change in Settings** → `jarvis-navigate {view: "settings", path:
+  "governance/tool:governance"}`.
 - If `switches` is empty: "No governance switches reported."
 
 ---
@@ -396,20 +408,11 @@ except Diagnostics, which has its own button) and a "Last updated HH:MM:SS" capt
 | 2 | Category chip click | none (client filter) | no | chip becomes active; count badge updates; list scrolls to top |
 | 3 | System Log search input | none (client filter, 200 ms debounce) | no | count badge `"{shown} of {total}"`; empty-match message (see States) |
 | 4 | Activity search input | none (client filter, 200 ms debounce) | no | badge `"{shown} of {total}"` |
-| 5 | Diagnostics **Run check** | `jarvis/diagnostics` then `jarvis/get_calibration` | no | button disabled + "Checking…" until both settle; on reject show error text in body |
-| 6 | Governance toggle (safety, ON→OFF) | `set_enforcement {key, enabled:false}` | **yes** — dialog: title `Turn OFF the safety enforcement "{name}"?`, body `This reverts that guard to observe-only (log-only) until you turn it back on. Only do this for debugging.`, confirm "Turn off" (destructive style), cancel "Cancel" | success toast `✓ {name} → OFF`; then re-fetch `get_enforcement`. Failure toast `✗ {name} — {message}`; switch snaps back to its previous state |
-| 7 | Governance toggle (capability, OFF→ON) | `set_enforcement {key, enabled:true}` | **yes** — dialog: title `Enable "{name}"?`, body `This makes the kernel authoritative for that capability.`, confirm "Enable" | as above with `→ ON` |
-| 8 | Governance toggle (safety OFF→ON, or capability ON→OFF) | `set_enforcement` | no (these moves reduce autonomy / restore a guard) | as above |
+| 5 | Diagnostics **Run check** | `jarvis/diagnostics` and `jarvis/get_calibration` in parallel (also run once automatically when the card first gets `hass`) | no | button disabled + "Checking…" until both settle; on reject show error text in body |
+| 6 | Governance **Change in Settings** | none (`jarvis-navigate {view: "settings", path: "governance/tool:governance"}`) | no | Settings › Governance opens with the governance tool card flashed |
 
-Confirmation dialogs: use HA's `showConfirmationDialog` (fire `show-dialog` with
-`dialogTag: "dialog-box"`) or an in-view `ha-dialog`; never `window.confirm`.
-The toggle control is disabled while its request is in flight. The row is updated
-from the `switch` object in the `set_enforcement` response immediately, then the whole
-list is refreshed with `get_enforcement`.
-
-Toasts: use HA's `hass-notification` event (`fireEvent(this, "hass-notification",
-{message})`) — the old panel used its own toast with `✓`/`✗` prefixes; keep the
-prefixes in the message text so the i18n strings line up.
+Writing a switch (with its confirmation dialogs and toasts) is Settings › Governance's job
+(settings-tools.md §4.12); this view never calls `jarvis/set_enforcement`.
 
 ---
 
@@ -422,7 +425,7 @@ prefixes in the message text so the i18n strings line up.
 | Diagnostics | "Loading…" in body on first run; "Checking…" button label on re-run | `services.length === 0`: show `summary` only ("no core services active") | `Couldn't run diagnostics — restart Home Assistant after updating.` followed by `{message}` in secondary text; badge shows "—" | Run check disabled while in flight |
 | Calibration (inside Diagnostics) | shares Diagnostics loading | `n === 0`: "No judged decisions yet — this appears once JARVIS's decisions accrue outcomes." | never rejects; if payload has `error`, render the empty state | n/a |
 | Cognitive Core | "Loading…" on first load only | all zeros is a valid state — render zeros | never rejects; if `error` present show it as secondary text and badge "Stopped" | n/a |
-| Governance | "Loading governance switches…" | "No governance switches reported." | `Couldn't load governance switches — {message}` | each toggle disabled while its own `set_enforcement` is in flight |
+| Governance | "Loading governance switches…" | "No governance switches reported." | `Couldn't load governance switches — {message}` (`ha-alert error`, or a `role="alert"` banner without HA elements) | n/a (read-only) |
 
 Polling stops when the view is disconnected (`disconnectedCallback`) or the browser tab
 is hidden (`document.visibilityState !== "visible"`), and resumes with an immediate fetch
@@ -431,6 +434,8 @@ on return. If `hass` is not yet set, render loading states and fetch once `hass`
 ---
 
 ## Strings
+
+**Phase 3 status:** every panel key is now translated in all 22 language files (`frontend/i18n-missing.json` reports nothing missing; `npm run i18n:report` regenerates it). The de.json / ✓ / ✗ columns below record what existed before the port; the code's `t()` keys (`npm run i18n:keys`) are authoritative where they differ from this list.
 
 Every user-visible English string; wrap each with `t()`. Keys are the exact English
 text (the i18n files are keyed that way). Column "de.json" = already present in
@@ -485,27 +490,23 @@ translating the template, i.e. the key is the template with the placeholder toke
 | `{n}m ago` / `{n}h ago` / `{n}d ago` | no | relative time |
 | `Governance` | no | card E header |
 | `Enforcement` | no (`ENFORCEMENT` was the old badge; neither exists) | card E badge |
-| `JARVIS's kernel brings each capability online along a shadow → parity → enforce ladder, each behind a kill-switch. Here you control those switches: the opt-in capabilities ship OFF (enable when you're ready), and the live safety guards ship ON (leave them on). Changes take effect immediately and survive a restart.` | no | card E intro |
-| `Owner opt-in capabilities` | no | card E group 1 |
-| `These ship OFF. Turning one ON makes the kernel authoritative for that capability — your choice, behaviour-changing.` | no | card E group 1 |
-| `Safety & governance — kill-switches (keep ON)` | no | card E group 2 |
-| `These ship ON and guard autonomous behaviour. Turning one OFF reverts that guard to observe-only (log-only) — only for debugging.` | no | card E group 2 |
-| `overridden` | no | card E tag |
-| `ON` / `OFF` | yes (AN / AUS) | toggle labels if a button is used |
+| `The kernel's enforcement kill-switches, read-only here. Turn them on or off in Settings › Governance.` | no | card E intro |
+| `Owner opt-in capabilities` | no | card E count row |
+| `Safety & governance — kill-switches (keep ON)` | no | card E count row |
+| `Owner overrides` | no | card E count row |
+| `{on} of {total} ON` | no | card E count badges |
+| `Not at the shipped default:` / `Every switch is at its shipped default.` | no | card E changed list |
+| `ON` / `OFF` | yes (AN / AUS) | card E changed list |
+| `default: ON` / `default: OFF` | no | card E changed list |
+| `Change in Settings` | no | card E button |
+| `Filter by category` | no | card A chip group `aria-label` |
 | `Loading governance switches…` | no | card E loading |
 | `No governance switches reported.` | no | card E empty |
 | `Couldn't load governance switches — {message}` | no | card E error |
-| `Turn OFF the safety enforcement "{name}"?` | no | dialog title |
-| `This reverts that guard to observe-only (log-only) until you turn it back on. Only do this for debugging.` | no | dialog body |
-| `Enable "{name}"?` | no | dialog title |
-| `This makes the kernel authoritative for that capability.` | no | dialog body |
-| `Turn off` / `Enable` / `Cancel` | no | dialog buttons |
-| `✓ {name} → ON` / `✓ {name} → OFF` | no | success toast |
-| `✗ {name} — {message}` | no | failure toast |
 
 Backend-supplied text that is NOT translated (render verbatim): debug-log `cat` and
 `msg`; activity `tag`/`msg`/`source`; diagnostics `summary`, `name`, `detail`; switch
-`name`, `explanation`, `phase`.
+`name`.
 
 ---
 
@@ -562,9 +563,9 @@ Backend-supplied text that is NOT translated (render verbatim): debug-log `cat` 
 - **`certification` may be `{}`**, and `last_analysis` is `{}` until the first analysis
   after an HA restart (it is in-memory on the analyzer).
 - **`set_enforcement` has real behavioural consequences** (disables a safety guard or
-  makes the kernel authoritative). The confirmation rules in Actions #6/#7 are mandatory;
-  the response's `switch` object is the authoritative post-write state.
-- **Admin gating**: all seven commands are `require_admin`; a non-admin user never
+  makes the kernel authoritative); that is why this view only summarises the switches and
+  the confirmed write lives in one place, Settings › Governance.
+- **Admin gating**: all seven commands are `require_admin` (this view sends six of them); a non-admin user never
   reaches the panel (`require_admin=True` in `panel_register.py`), but if HA ever
   relaxes that, every call rejects with `code: "unauthorized"` — surface it as the
   card's error state rather than crashing.

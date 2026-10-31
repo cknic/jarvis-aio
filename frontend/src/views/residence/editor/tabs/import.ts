@@ -29,6 +29,7 @@ import { ws, WsError } from "../../../../ws";
 import { confirmDialog } from "../../../../components";
 import "../../../../components";
 import { JarvisEditorTab } from "../tab-base";
+import { keepFocus } from "../../../../focus";
 import { WS_FRAME_LIMIT, floorBackgroundFrameBytes } from "../store";
 import {
   CANONICAL_FLOORS, FT_PER_UNIT, M_PER_FT, bboxOfPoints, dim, ensureFloor, newRoomId, parsePoints, r1, ri, roomPoints, toReal, unionBBox, unitLabel,
@@ -110,6 +111,13 @@ export class JarvisEditorImport extends JarvisEditorTab {
 
   private _sourcesRequested = false;
   private _unsubs: Array<() => void> = [];
+  /**
+   * The operations that set `_busy`, oldest first, each under its own token: `_busy` is the newest
+   * one's kind. An operation clears only its own claim, so one that ends inside another (an alignment
+   * written while a plan file's backgrounds are) never clears the other's busy state.
+   */
+  private _busyJobs: Array<{ token: number; kind: Exclude<Busy, ""> }> = [];
+  private _busyToken = 0;
 
   static override styles = [
     base,
@@ -350,6 +358,18 @@ export class JarvisEditorImport extends JarvisEditorTab {
   private _pickFile(id: string): void {
     this.renderRoot.querySelector<HTMLInputElement>(`#${id}`)?.click();
   }
+  /** Mark the tab busy with `kind`; returns the token _releaseBusy() takes. */
+  private _claimBusy(kind: Exclude<Busy, "">): number {
+    const token = ++this._busyToken;
+    this._busyJobs = [...this._busyJobs, { token, kind }];
+    this._busy = kind;
+    return token;
+  }
+  /** End the claim `token` (only that one): busy falls back to the newest claim still running, else "". */
+  private _releaseBusy(token: number): void {
+    this._busyJobs = this._busyJobs.filter((j) => j.token !== token);
+    this._busy = this._busyJobs[this._busyJobs.length - 1]?.kind ?? "";
+  }
 
   // ── render ────────────────────────────────────────────────────────────
   override render() {
@@ -469,7 +489,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
       const ok = await confirmDialog({ heading: t("Replace the background of {floor}?", { floor: this._floorName(floor) }), confirmLabel: t("Replace") });
       if (!ok) return;
     }
-    this._busy = "import";
+    const job = this._claimBusy("import");
     this._mapNotice = null;
     try {
       const res = await ws<{ floor?: string; entity_id?: string; bytes?: number }>(this._hass, "jarvis/import_floorplan", { entity_id: entity, floor });
@@ -479,7 +499,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
     } catch (err) {
       this._mapNotice = { level: "error", text: t("Import failed — {message}", { message: errMessage("jarvis/import_floorplan", err) }) };
     } finally {
-      this._busy = "";
+      this._releaseBusy(job);
     }
   }
 
@@ -488,7 +508,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
     const entity = this._entity;
     if (!s || !entity || this._busy) return;
     const floor = s.floor;
-    this._busy = "detect";
+    const job = this._claimBusy("detect");
     this._mapNotice = null;
     try {
       const res = await ws<{ rooms?: unknown; count?: number }>(this._hass, "jarvis/segment_floorplan_rooms", { entity_id: entity, target_span: this._spanValue });
@@ -517,7 +537,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
       // the backend's messages (needs numpy, no rooms ...) are shown verbatim
       this._mapNotice = { level: e.code === "needs_numpy" || e.code === "no_rooms" ? "warning" : "error", text: e.message };
     } finally {
-      this._busy = "";
+      this._releaseBusy(job);
     }
   }
 
@@ -614,11 +634,11 @@ export class JarvisEditorImport extends JarvisEditorTab {
         ${href ? html`<img class="thumb" src=${href} alt=${t("Background image of {floor}", { floor: this._floorName(floor) })} @error=${(e: Event) => { (e.target as HTMLElement).hidden = true; }} />` : html`<p class="hint">${t("upload a floor-plan image, then set its opacity here")}</p>`}
         <input class="file" id="imp-bg-file" type="file" accept="image/*" tabindex="-1" aria-hidden="true" @change=${(e: Event) => void this._onBgFile(e)} />
         <div class="actions">
-          <button type="button" class="jv-btn" ?disabled=${busy || bgStatus?.level === "saving"} aria-busy=${String(busy)} @click=${() => this._pickFile("imp-bg-file")}>
+          <button type="button" class="jv-btn" data-bg-upload ?disabled=${busy || bgStatus?.level === "saving"} aria-busy=${String(busy)} @click=${() => this._pickFile("imp-bg-file")}>
             ${this._icon("mdi:upload")}<span>${busy ? t("Saving…") : raw ? t("Replace image…") : t("Choose image…")}</span>
           </button>
           ${raw
-            ? html`<button type="button" class="jv-btn text danger-text" ?disabled=${busy || bgStatus?.level === "saving"} @click=${() => void this._removeBg()}>${this._icon("mdi:image-remove")}<span>${t("Remove background")}</span></button>`
+            ? html`<button type="button" class="jv-btn text danger-text" ?disabled=${busy || bgStatus?.level === "saving"} @click=${this._onRemoveBg}>${this._icon("mdi:image-remove")}<span>${t("Remove background")}</span></button>`
             : nothing}
         </div>
         <div class="field">
@@ -649,7 +669,8 @@ export class JarvisEditorImport extends JarvisEditorTab {
     const stored = parseAlign(s.config)[floor];
     const active = aligning(s);
     const a = (active ? alignDraft(s) : null) ?? effectiveAlign(s, floor);
-    const saving = this._busy === "align";
+    // an upload / removal / plan-file import writing this dict is in flight too: one write at a time
+    const saving = this._busy === "align" || this._busy === "bg";
     if (!size || !a) {
       return html`<p class="sub">${size === null ? t("This image can't be aligned (its size is unknown).") : t("Loading...")}</p>`;
     }
@@ -685,22 +706,18 @@ export class JarvisEditorImport extends JarvisEditorTab {
     const s = this.store;
     if (!s) return;
     if (!startAlignTool(s, (floor, value) => void this._writeAlign(floor, value))) return;
-    try {
-      (s.canvas?.shadowRoot?.querySelector("svg") as SVGSVGElement | null)?.focus({ preventScroll: true });
-    } catch {
-      /* focus is a nicety */
-    }
+    s.canvas?.focusSurface();
   }
 
   private async _writeAlign(floor: FloorKey, value: BgAlign | null): Promise<void> {
     const s = this.store;
     if (!s) return;
-    this._busy = "align";
+    const job = this._claimBusy("align");
     this._bgNotice = null;
     // only this floor's alignment travels: the images stay on the backend
     const ok = await s.writeFloorBackground(floor, { align: roundAlign(value) });
     clearAlignPreview(s);
-    this._busy = "";
+    this._releaseBusy(job);
     if (ok) s.toast(value ? t("Background aligned on {floor}", { floor: this._floorName(floor) }) : t("Background fitted to the rooms again"));
     else this._bgNotice = { level: "error", text: t("Image import failed — {message}", { message: s.settingStatus.floor_plan_bg?.message || "" }) };
   }
@@ -733,7 +750,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
       const ok = await confirmDialog({ heading: t("Replace the background of {floor}?", { floor: this._floorName(floor) }), confirmLabel: t("Replace") });
       if (!ok) return;
     }
-    this._busy = "bg";
+    const job = this._claimBusy("bg");
     this._bgNotice = null;
     try {
       // one jarvis/set_floor_background message per floor (HA caps a message at 4 MiB): the image
@@ -749,9 +766,14 @@ export class JarvisEditorImport extends JarvisEditorTab {
           ? { level: "error", text: t("Image too large after compression — use a smaller image") }
           : { level: "error", text: t("Image import failed — {message}", { message: err instanceof Error ? err.message : String(err) }) };
     } finally {
-      this._busy = "";
+      this._releaseBusy(job);
     }
   }
+
+  /** Remove disappears with the image: keyboard focus moves to the upload button that takes its place. */
+  private _onRemoveBg = (e: Event): void => {
+    keepFocus(e, this, () => this._removeBg(), () => this.renderRoot.querySelector<HTMLElement>("[data-bg-upload]"));
+  };
 
   private async _removeBg(): Promise<void> {
     const s = this.store;
@@ -760,10 +782,10 @@ export class JarvisEditorImport extends JarvisEditorTab {
     const ok = await confirmDialog({ heading: t("Remove the background image of {floor}?", { floor: this._floorName(floor) }), confirmLabel: t("Remove"), destructive: true });
     if (!ok) return;
     if (aligning(s)) cancelAlignTool(s);
-    this._busy = "bg";
+    const job = this._claimBusy("bg");
     this._bgNotice = null;
     const done = await s.writeFloorBackground(floor, { image: null, align: null });
-    this._busy = "";
+    this._releaseBusy(job);
     if (done) s.toast(t("Background image removed from {floor}", { floor: this._floorName(floor) }));
     else this._bgNotice = { level: "error", text: t("Image import failed — {message}", { message: s.settingStatus.floor_plan_bg?.message || "" }) };
   }
@@ -937,6 +959,9 @@ export class JarvisEditorImport extends JarvisEditorTab {
 
   // ── Plan file (I10-I11) ───────────────────────────────────────────────
   private _renderPlanFile() {
+    // Import JSON is ignored while the tab is busy (a plan file's backgrounds are still being written, or
+    // another import runs) - aria-disabled rather than disabled, so a keyboard user's focus stays on it
+    const busy = !!this._busy;
     return html`
       <section class="card" aria-labelledby="imp-file-h">
         <h3 id="imp-file-h">${this._icon("mdi:code-json")}${t("Plan file")}</h3>
@@ -944,7 +969,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
         <input class="file" id="imp-plan-file" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true" @change=${(e: Event) => void this._onPlanFile(e)} />
         <div class="actions">
           <button type="button" class="jv-btn" @click=${() => this._export()}>${this._icon("mdi:download")}<span>${t("Export JSON")}</span></button>
-          <button type="button" class="jv-btn" @click=${() => this._pickFile("imp-plan-file")}>${this._icon("mdi:upload")}<span>${t("Import JSON…")}</span></button>
+          <button type="button" class="jv-btn" aria-disabled=${String(busy)} @click=${() => { if (!this._busy) this._pickFile("imp-plan-file"); }}>${this._icon("mdi:upload")}<span>${t("Import JSON…")}</span></button>
         </div>
         ${this._notice(this._planNotice)}
       </section>
@@ -1009,16 +1034,26 @@ export class JarvisEditorImport extends JarvisEditorTab {
         const ok = await confirmDialog({ heading: t("Also import {n} background images? They save immediately.", { n }), confirmLabel: t("Import") });
         if (ok) {
           // one message per floor: the file's image replaces the current one, its alignment (if any)
-          // replaces that floor's; a failed floor does not stop the others, and is reported
+          // replaces that floor's; a failed floor does not stop the others, and is reported. Busy for
+          // the whole loop: Upload / Remove / Align / another Import JSON would interleave their own
+          // floor_plan_bg writes with the file's - one at a time. An active align tool goes first (as
+          // in _removeBg): its Done / Cancel / Enter would otherwise commit an alignment mid-loop.
+          if (aligning(s)) cancelAlignTool(s);
           const failed: FloorKey[] = [];
           let message = "";
-          for (const [floor, image] of Object.entries(pick.images)) {
-            const align = pick.align[floor];
-            const done = await s.writeFloorBackground(floor, align ? { image, align } : { image });
-            if (!done) {
-              failed.push(floor);
-              message ||= s.settingStatus.floor_plan_bg?.message || "";
+          const job = this._claimBusy("bg");
+          this._bgNotice = null;
+          try {
+            for (const [floor, image] of Object.entries(pick.images)) {
+              const align = pick.align[floor];
+              const done = await s.writeFloorBackground(floor, align ? { image, align } : { image });
+              if (!done) {
+                failed.push(floor);
+                message ||= s.settingStatus.floor_plan_bg?.message || "";
+              }
             }
+          } finally {
+            this._releaseBusy(job);
           }
           if (failed.length === n) this._planNotice = { level: "error", text: t("Image import failed — {message}", { message }) };
           else if (failed.length)
@@ -1056,7 +1091,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
       destructive: true,
     });
     if (!ok) return;
-    this._busy = "reset";
+    const job = this._claimBusy("reset");
     this._resetNotice = null;
     try {
       await ws(this._hass, "jarvis/update_config", { key: "floor_plan_rooms", value: {} });
@@ -1065,7 +1100,7 @@ export class JarvisEditorImport extends JarvisEditorTab {
     } catch (err) {
       this._resetNotice = { level: "error", text: t("Save failed — {message}", { message: errMessage("jarvis/update_config", err) }) };
     } finally {
-      this._busy = "";
+      this._releaseBusy(job);
     }
   }
 }

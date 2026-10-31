@@ -11,6 +11,7 @@ import { live } from "lit/directives/live.js";
 import { haDefined } from "../../../../ha";
 import { t } from "../../../../i18n";
 import type { Hass } from "../../../../types";
+import { toHaSelectValue, fromHaSelectValue } from "../../../settings/coerce";
 import type { Hit } from "../canvas";
 import type { EditorStore } from "../store";
 import { OPENING_PRESETS, WALLS, type Opening, type Wall } from "../model";
@@ -32,8 +33,9 @@ export function icon(name: string, fallback: string): TemplateResult {
 
 /** A labelled select: ha-select + ha-list-item / mwc-list-item, or a native <select>. `onChange` fires only for a different value. */
 export function selectField(o: { id: string; label: string; value: string; options: SelectOption[]; onChange: (value: string) => void; disabled?: boolean }): TemplateResult {
+  // ha-select floats its label only over a non-empty value: "" ("— none —") travels as HA_SELECT_EMPTY
   const pick = (e: Event) => {
-    const v = String((e.target as HTMLSelectElement | null)?.value ?? "");
+    const v = fromHaSelectValue(String((e.target as HTMLSelectElement | null)?.value ?? ""));
     if (v !== o.value) o.onChange(v);
   };
   const inOptions = o.options.some((x) => x.value === o.value);
@@ -41,9 +43,9 @@ export function selectField(o: { id: string; label: string; value: string; optio
     const item = haDefined("ha-list-item") ? literal`ha-list-item` : literal`mwc-list-item`;
     return html`
       <div class="field">
-        <ha-select id=${o.id} .label=${o.label} .value=${live(o.value)} ?disabled=${!!o.disabled} naturalMenuWidth fixedMenuPosition @selected=${pick} @closed=${stop}>
-          ${inOptions ? nothing : staticHtml`<${item} .value=${o.value} disabled>${o.value}</${item}>`}
-          ${o.options.map((x) => staticHtml`<${item} .value=${x.value}>${x.label}</${item}>`)}
+        <ha-select id=${o.id} .label=${o.label} .value=${live(toHaSelectValue(o.value))} ?disabled=${!!o.disabled} naturalMenuWidth fixedMenuPosition @selected=${pick} @closed=${stop}>
+          ${inOptions ? nothing : staticHtml`<${item} .value=${toHaSelectValue(o.value)} disabled>${o.value}</${item}>`}
+          ${o.options.map((x) => staticHtml`<${item} .value=${toHaSelectValue(x.value)}>${x.label}</${item}>`)}
         </ha-select>
       </div>
     `;

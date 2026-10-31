@@ -21,7 +21,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { base } from "../../../../theme/base";
 import { t } from "../../../../i18n";
 import { watchDefinitions } from "../../../../ha";
-import { keepFocus } from "../../../../focus";
+import { keepFocus, type FocusTarget } from "../../../../focus";
 import { confirmDialog } from "../../../../components";
 import "../../../../components";
 import { num } from "../../plan";
@@ -366,9 +366,15 @@ export class JarvisEditorRooms extends JarvisEditorTab {
     void this.store?.canvas?.focusHit(raw);
   }
 
-  /** Where a Remove corner hands focus once its block is gone: the room's inspector heading, else (a lot corner) the plan. */
-  private _focusAfterCorner(): HTMLElement | SVGElement | null {
-    return this.renderRoot.querySelector<HTMLElement>("#insp-h") ?? (this.canvas ?? this.store?.canvas)?.shadowRoot?.querySelector<SVGSVGElement>("svg") ?? null;
+  /**
+   * Where a Remove corner hands focus once its block is gone: the room's inspector heading, else (a lot
+   * corner) the plan through canvas.focusSurface(), which does not scroll the page up to it.
+   */
+  private _focusAfterCorner(): FocusTarget {
+    const heading = this.renderRoot.querySelector<HTMLElement>("#insp-h");
+    if (heading) return heading;
+    const canvas = this.canvas ?? this.store?.canvas;
+    return canvas ? () => canvas.focusSurface() : null;
   }
 
   private _icon(name: string, fallback = ""): TemplateResult | typeof nothing {

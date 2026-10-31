@@ -7,11 +7,14 @@
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { live } from "lit/directives/live.js";
+import { repeat } from "lit/directives/repeat.js";
 import { html as staticHtml, literal } from "lit/static-html.js";
 import { t } from "../../../i18n";
 import { haDefined } from "../../../ha";
 import { WsError } from "../../../ws";
 import { confirmDialog } from "../../../components";
+import { keepRowFocus, type RowFocus } from "../../../focus";
+import { HA_SELECT_EMPTY, toHaSelectValue, fromHaSelectValue } from "../coerce";
 import "../../../components/jv-picker";
 import type { PickerChangeDetail } from "../../../components/jv-picker";
 import { JarvisToolCard, friendlyName, wsMessage } from "./runtime-base";
@@ -24,6 +27,22 @@ export interface MuteList {
 
 /** services.yaml `shush` categories */
 export const MUTE_CATEGORIES = ["appliances", "doors_windows", "presence", "energy", "security", "climate", "lights", "schedule"];
+
+/**
+ * A chip's Unmute hands keyboard focus to the next / previous chip's Unmute,
+ * else the entity picker. Every × is disabled until jarvis/mutes answers with
+ * the new list, so the removal returns that call's Promise.
+ */
+const UNMUTE_FOCUS: RowFocus = { row: "ul.chips > li", key: "data-key", control: "button.jv-icon-btn", fallback: [".add jv-picker"] };
+
+interface Chip {
+  /** "entity:<id>" / "category:<name>" - stable across replies */
+  key: string;
+  name: string;
+  id: string;
+  isCategory: boolean;
+  unmute: Record<string, unknown>;
+}
 
 @customElement("jarvis-tool-mutes")
 export class JarvisToolMutes extends JarvisToolCard {
@@ -166,30 +185,36 @@ export class JarvisToolMutes extends JarvisToolCard {
 
   private _onCategory(e: Event): void {
     const el = e.target as HTMLSelectElement & { value?: string };
-    this._category = String(el.value ?? "");
+    this._category = fromHaSelectValue(String(el.value ?? ""));
   }
 
   // ── render ──────────────────────────────────────────────────────────────
 
   private _renderChips(list: MuteList) {
     const off = this.offline || this._busy;
-    const chip = (name: string, id: string, isCategory: boolean, unmute: Record<string, unknown>) => html`
-      <li class="chip" title=${id}>
-        <span class="name ${!isCategory && name === id ? "jv-mono" : ""}">${name}</span>
-        ${isCategory
-          ? html`<jv-state-badge level="info" nodot .label=${t("category")}></jv-state-badge>`
-          : name !== id
-            ? html`<span class="jv-mono jv-muted jv-truncate">${id}</span>`
-            : nothing}
-        <button type="button" class="jv-icon-btn" aria-label=${t("Unmute {name}", { name })} ?disabled=${off} @click=${() => void this._mutate({ action: "unmute", ...unmute })}>
-          <span aria-hidden="true">×</span>
-        </button>
-      </li>
-    `;
+    const chips: Chip[] = [
+      ...list.entities.map((id) => ({ key: `entity:${id}`, name: friendlyName(this.hass, id), id, isCategory: false, unmute: { entity_id: id } })),
+      ...list.categories.map((c) => ({ key: `category:${c}`, name: c, id: c, isCategory: true, unmute: { category: c } })),
+    ];
     return html`
       <ul class="chips">
-        ${list.entities.map((id) => chip(friendlyName(this.hass, id), id, false, { entity_id: id }))}
-        ${list.categories.map((c) => chip(c, c, true, { category: c }))}
+        ${repeat(
+          chips,
+          (c) => c.key,
+          ({ key, name, id, isCategory, unmute }) => html`
+            <li class="chip" data-key=${key} title=${id}>
+              <span class="name ${!isCategory && name === id ? "jv-mono" : ""}">${name}</span>
+              ${isCategory
+                ? html`<jv-state-badge level="info" nodot .label=${t("category")}></jv-state-badge>`
+                : name !== id
+                  ? html`<span class="jv-mono jv-muted jv-truncate">${id}</span>`
+                  : nothing}
+              <button type="button" class="jv-icon-btn" aria-label=${t("Unmute {name}", { name })} ?disabled=${off} @click=${(e: Event) => keepRowFocus(e, this, UNMUTE_FOCUS, () => this._mutate({ action: "unmute", ...unmute }))}>
+                <span aria-hidden="true">×</span>
+              </button>
+            </li>
+          `,
+        )}
       </ul>
     `;
   }
@@ -200,8 +225,8 @@ export class JarvisToolMutes extends JarvisToolCard {
     if (haDefined("ha-select")) {
       const item = haDefined("ha-list-item") ? literal`ha-list-item` : literal`mwc-list-item`;
       return html`
-        <ha-select .label=${label} .value=${live(this._category)} ?disabled=${this.offline} naturalMenuWidth fixedMenuPosition @selected=${this._onCategory} @closed=${(e: Event) => e.stopPropagation()}>
-          ${staticHtml`<${item} value="">${none}</${item}>`}
+        <ha-select .label=${label} .value=${live(toHaSelectValue(this._category))} ?disabled=${this.offline} naturalMenuWidth fixedMenuPosition @selected=${this._onCategory} @closed=${(e: Event) => e.stopPropagation()}>
+          ${staticHtml`<${item} value=${HA_SELECT_EMPTY}>${none}</${item}>`}
           ${MUTE_CATEGORIES.map((c) => staticHtml`<${item} value=${c}>${c}</${item}>`)}
         </ha-select>
       `;

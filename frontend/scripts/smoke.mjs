@@ -13,23 +13,39 @@
 //     tablist; the narrow bottom nav shows the four primary views plus
 //     "More", whose focus-trapped bottom sheet lists the other six, closes on
 //     Escape / scrim click and shows the active secondary view as current,
-//   - tab navigation pushes /jarvis/<view> and the back button restores it,
+//   - tab navigation pushes /jarvis/<view> and the back button restores it;
+//     jarvis-refresh fetches the snapshot exactly once (the poll is paused),
 //   - a sub-route (/residence/editor) mounts the owning view with subPath,
 //   - every Settings category shows its registered tool cards and field
 //     editors (settings/tools), with no error state; the voice-confirm list
 //     and the biometrics map render the fixture values and save one edit as
 //     exactly their key through jarvis/update_config,
-//   - every jarvis-editor-* / jarvis-tool-* element the bundle defines is
-//     asserted somewhere in this run (a new editor must be added here),
+//   - every jarvis-editor-* / jarvis-tool-* element the bundle defines
+//     rendered in a check that actually ran (a new editor must be added here,
+//     under a category the Settings walk visits),
 //   - every floor-plan editor sub-tab (/residence/editor/<tab>) mounts its
 //     element and the canvas draws the rooms, in light and dark,
 //   - keyboard focus survives a row's Remove (src/focus.ts) in the editor's
 //     Openings, Doors, Cameras & pins lists and toasts and in the Settings
-//     appliances, voice confirm, pairings and biometrics editors: it lands on
-//     the next row's control, else the previous row's, else the fallback,
+//     appliances, voice confirm, pairings, biometrics and muted-announcements
+//     editors: it lands on the next row's control, else the previous row's,
+//     else the fallback - also when the backend answers late (Doors, mutes:
+//     the neighbours are disabled until it does) or fails (the row comes
+//     back with its own control focused), and a focused toast holds its
+//     auto-dismiss (released when a re-render strips its focused Undo),
 //   - an editor round trip: add a room through the store, undo, redo, save
 //     (exactly floor_plan_rooms is written, and it is the stored fixture plus
 //     the new room), reload the saved snapshot (clean, no conflict banner),
+//   - backgrounds travel one floor per jarvis/set_floor_background message;
+//     a plan file's images keep the background card busy while they are
+//     written (an open align tool is cancelled first, an alignment ending
+//     inside the loop does not clear its busy, a second Import JSON is
+//     ignored with focus kept) and report a partial or total failure by floor,
+//   - overlapping immediate-save writes of one key (opacity, a background
+//     per floor): only the latest sets the status or reverts, and it reverts
+//     to the last confirmed value, never to a refused earlier one,
+//   - the narrow editor canvas takes the fitted plan's aspect ratio (zoom and
+//     pan do not resize it) and its grid fills a letterboxed svg,
 //   - the editor model self-test (src/views/residence/editor/selftest.ts:
 //     parse/serialize round trip of the fixture plan, units, geometry),
 //   - every WS command literal in src/ has a dev/fixtures file, no fixture is
@@ -464,11 +480,16 @@ const SETTINGS_FIELD_EDITORS = {
   voice: ["jarvis-editor-pairings", "jarvis-editor-toggle-list", "jarvis-editor-voice-confirm", "jv-picker"],
   learning: ["jv-picker"], safety: ["jarvis-editor-toggle-list", "jarvis-editor-appliances"], cameras: ["jv-picker"], home: ["jv-picker"],
 };
-/** tool card elements seen under the asserted ids (completeness check) */
+/** tool card / field editor elements whose rendered check passed (completeness check: what ran, not what is listed) */
 const toolCardTags = new Set();
+const fieldEditorTags = new Set();
+// every category either table names is visited: a field editor listed under a category with no tool-card
+// entry is still navigated to and checked
+const SETTINGS_CATEGORIES = [...new Set([...Object.keys(SETTINGS_TOOL_CARDS), ...Object.keys(SETTINGS_FIELD_EDITORS)])];
 for (const theme of ["light", "dark"]) {
   applyTheme(theme);
-  for (const [cat, ids] of Object.entries(SETTINGS_TOOL_CARDS)) {
+  for (const cat of SETTINGS_CATEGORIES) {
+    const ids = SETTINGS_TOOL_CARDS[cat] ?? [];
     panel.route = { prefix: PREFIX, path: `/settings/${cat}` };
     await settle(20);
     const view = sr.querySelector("jarvis-view-settings");
@@ -479,7 +500,9 @@ for (const theme of ["light", "dark"]) {
     const empty = cards.filter((c) => !c.shadowRoot || deepText(c).trim().length === 0).map((c) => c.dataset.toolId);
     check(`[${theme}] /settings/${cat} every tool card rendered content`, empty.length === 0, empty.join(","));
     for (const tag of SETTINGS_FIELD_EDITORS[cat] ?? []) {
-      check(`[${theme}] /settings/${cat} field editor <${tag}> rendered`, deepAll(view, tag).length > 0);
+      const rendered = deepAll(view, tag).length > 0;
+      check(`[${theme}] /settings/${cat} field editor <${tag}> rendered`, rendered);
+      if (rendered) fieldEditorTags.add(tag);
     }
     const errs = view ? errorStates(view) : ["no view"];
     check(`[${theme}] /settings/${cat} shows no error state`, errs.length === 0, errs.slice(0, 3).join(" | "));
@@ -487,7 +510,9 @@ for (const theme of ["light", "dark"]) {
   }
 }
 // ── settings: two field editors save one edit through jarvis/update_config ─
+// (once, in HA light: the loop above leaves dark applied)
 {
+  applyTheme("light");
   const writes = [];
   const backend = makeHass("en");
   const fixtureCall = backend.callWS;
@@ -563,6 +588,8 @@ function planEditorNow() {
 const EDITOR_TABS = { rooms: "jarvis-editor-rooms", openings: "jarvis-editor-openings", doors: "jarvis-editor-doors", pins: "jarvis-editor-pins", import: "jarvis-editor-import" };
 const planEditor = () => sr.querySelector("jarvis-view-residence")?.shadowRoot?.querySelector("jarvis-plan-editor") ?? null;
 const planCanvas = () => planEditor()?.shadowRoot?.querySelector("jv-plan-canvas") ?? null;
+/** editor tab elements whose rendered check passed (completeness check) */
+const editorTabTags = new Set();
 for (const theme of ["light", "dark"]) {
   applyTheme(theme);
   for (const [tab, tag] of Object.entries(EDITOR_TABS)) {
@@ -574,7 +601,9 @@ for (const theme of ["light", "dark"]) {
     check(`[${theme}] editor/${tab}: store.tab follows the route`, ed.store.tab === tab, ed.store.tab);
     check(`[${theme}] editor/${tab}: <${tag}> is defined (not the placeholder)`, !!window.customElements.get(tag));
     const el = ed.shadowRoot?.querySelector(tag);
-    check(`[${theme}] editor/${tab}: <${tag}> rendered content`, !!el?.shadowRoot && deepText(el).trim().length > 0);
+    const rendered = !!el?.shadowRoot && deepText(el).trim().length > 0;
+    check(`[${theme}] editor/${tab}: <${tag}> rendered content`, rendered);
+    if (rendered) editorTabTags.add(tag);
     const canvas = planCanvas();
     const drawn = canvas ? deepAll(canvas, '[data-hit^="room:"]').length : 0;
     check(`[${theme}] editor/${tab}: canvas draws every room of the floor`, drawn === ed.store.rooms().length && drawn > 0, `drawn=${drawn} rooms=${ed.store.rooms().length}`);
@@ -602,15 +631,24 @@ function inside(node, ancestor) {
   for (let n = node; n; n = n.parentNode ?? n.host ?? null) if (n === ancestor) return true;
   return false;
 }
-/** focus `btn`, click it, settle -> the deep focus (null when the control was missing or never took focus) */
-async function activate(btn) {
+/**
+ * focus `btn`, click it, settle -> the deep focus (null when the control was missing or never took
+ * focus); `latency`: also wait that long for a delayed backend reply, and settle again
+ */
+async function activate(btn, latency = 0) {
   if (!btn) return null;
   btn.focus();
   if (deepActive() !== btn) return null;
   btn.click();
   await settle(10);
+  if (latency) {
+    await sleep(latency);
+    await settle(10);
+  }
   return deepActive();
 }
+/** the websocket round trip the latency cases simulate (longer than activate's settle) */
+const LATENCY = 80;
 function describe(el) {
   if (!el) return "the control was missing or never had focus";
   const cls = typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/).join(".")}` : "";
@@ -642,17 +680,61 @@ function describe(el) {
   check("focus: editor toast - Dismiss on the last -> the previous toast's Dismiss", !!now?.matches("[data-dismiss]") && /Toast two/.test(now.closest(".toast")?.textContent || ""), describe(now));
   now = await activate(dismiss("Toast two"));
   check("focus: editor toast - Dismiss on the only one -> the current editor tab", now?.getAttribute("role") === "tab" && now.getAttribute("aria-selected") === "true", describe(now));
+  // auto-dismissing toasts: the one focus lands on holds its timer while it has focus, the others still go
+  for (const m of ["Timed one", "Timed two", "Timed three"]) store?.toast(m, undefined, 400);
+  await settle(5);
+  const toastText = () => [...(planEditor()?.shadowRoot?.querySelectorAll(".toasts > .toast") ?? [])].map((x) => x.textContent.trim()).join(" | ");
+  now = await activate(dismiss("Timed one"));
+  check("focus: timed toast - Dismiss on the first -> the next toast's Dismiss", !!now?.matches("[data-dismiss]") && /Timed two/.test(now.closest(".toast")?.textContent || ""), describe(now));
+  await sleep(600);
+  await settle(5);
+  now = deepActive();
+  check("focus: timed toast - the focused toast outlives its 400 ms (held), the unfocused one is gone",
+    /Timed two/.test(now?.closest?.(".toast")?.textContent || "") && !/Timed three/.test(toastText()), `${describe(now)}; toasts: ${toastText()}`);
+  planEditor()?.shadowRoot?.querySelector('[role="tab"][aria-selected="true"]')?.focus();
+  await sleep(1700); // released: at least TOAST_RESUME_MS (1.5 s) again
+  await settle(5);
+  check("focus: timed toast - once focus leaves, it auto-dismisses again", !/Timed two/.test(toastText()), toastText());
+  // a held toast whose focused Undo a re-render strips (the history moved on): focus falls to <body>, and
+  // some browsers send no focusout for that - swallowed here - yet the hold must end and the toast go
+  for (const x of [...(store?.toasts ?? [])]) store.dismissToast(x.id);
+  const held = store?.toast("Stripped toast", { label: "Undo", run: () => store.undo() }, 400);
+  await settle(5);
+  const strippedToast = () => [...(planEditor()?.shadowRoot?.querySelectorAll(".toasts > .toast") ?? [])].find((x) => x.textContent.includes("Stripped toast"));
+  const undoBtn = strippedToast()?.querySelector(".jv-btn.text");
+  undoBtn?.focus();
+  check("focus: stripped toast - focus on its Undo holds it", !!undoBtn && deepActive() === undoBtn && !!store?.heldToasts.includes(held), describe(deepActive()));
+  const swallow = (e) => e.stopImmediatePropagation();
+  planEditor()?.shadowRoot?.addEventListener("focusout", swallow, true);
+  store?.change("Smoke step", (d) => {
+    d.floors.find((f) => f.key === store.floor).rooms[0].x += 1;
+  });
+  await settle(5);
+  planEditor()?.shadowRoot?.removeEventListener("focusout", swallow, true);
+  now = deepActive();
+  check("focus: stripped toast - the Undo is gone, focus fell to <body> and the hold was released after the update",
+    !!strippedToast() && !strippedToast().querySelector(".jv-btn.text") && (!now || now === document.body) && !store.heldToasts.includes(held), `${describe(now)}; held ${JSON.stringify(store?.heldToasts)}`);
+  await sleep(1700); // released: at least TOAST_RESUME_MS (1.5 s)
+  await settle(5);
+  check("focus: stripped toast - it auto-dismisses", !strippedToast(), toastText());
   while (store?.dirty && store.canUndo) store.undo();
   await settle(10);
   check("focus: Openings - undo restores the three openings, clean", store?.openings().length === 3 && !store.dirty);
 
-  // Doors: "Other mapped slots" (the fixture's garage_1 - no garage bays - plus two) against a backend that keeps writes
+  // Doors: "Other mapped slots" (the fixture's garage_1 - no garage bays - plus two) against a backend that
+  // keeps writes and answers after LATENCY ms, as HA does: the other Removes are disabled until it answers
   const stored = JSON.parse(JSON.stringify(fixture("panel_data")));
   stored.config.door_mapping = { ...stored.config.door_mapping, garage_7: "cover.garage_door", garage_8: "cover.garage_door" };
   const keeping = makeHass("en");
   const fixtureCall = keeping.callWS;
+  let failNext = false;
   keeping.callWS = async (msg) => {
     if (msg.type === "jarvis/update_config") {
+      await sleep(LATENCY);
+      if (failNext) {
+        failNext = false;
+        throw { code: "update_failed", message: "simulated write failure" };
+      }
       stored.config[msg.key] = JSON.parse(JSON.stringify(msg.value));
       return { key: msg.key, value: msg.value };
     }
@@ -670,10 +752,19 @@ function describe(el) {
   const slot = (k) => root?.querySelector(`.other > li[data-slot="${k}"] [data-remove]`);
   check("focus: Doors - three other mapped slots listed", root?.querySelectorAll(".other > li").length === 3, String(root?.querySelectorAll(".other > li").length));
   now = await activate(slot("garage_1"));
-  check("focus: Doors - Remove on the first other slot -> the next one's Remove", !!now?.matches("[data-remove]") && now.closest("li")?.dataset.slot === "garage_7", describe(now));
-  now = await activate(slot("garage_8"));
+  check("focus: Doors - while the write is in flight the row is gone and the other Removes are disabled",
+    !slot("garage_1") && slot("garage_7")?.disabled === true && slot("garage_8")?.disabled === true && stored.config.door_mapping.garage_1 !== undefined, describe(now));
+  await sleep(LATENCY);
+  await settle(10);
+  now = deepActive();
+  check("focus: Doors - Remove on the first other slot -> the next one's Remove once the write answered", !!now?.matches("[data-remove]") && now.closest("li")?.dataset.slot === "garage_7", describe(now));
+  failNext = true;
+  now = await activate(slot("garage_8"), LATENCY);
+  check("focus: Doors - a Remove whose write fails -> the row comes back with focus on its own Remove", !!now?.matches("[data-remove]") && now.closest("li")?.dataset.slot === "garage_8" && store?.settingStatus.door_mapping?.level === "error",
+    `${describe(now)}; rows ${[...(root?.querySelectorAll(".other > li") ?? [])].map((li) => `${li.dataset.slot}${li.querySelector("[data-remove]")?.disabled ? "(disabled)" : ""}`).join(",")}; status ${JSON.stringify(store?.settingStatus.door_mapping)}`);
+  now = await activate(slot("garage_8"), LATENCY);
   check("focus: Doors - Remove on the last other slot -> the previous one's Remove", !!now?.matches("[data-remove]") && now.closest("li")?.dataset.slot === "garage_7", describe(now));
-  now = await activate(slot("garage_7"));
+  now = await activate(slot("garage_7"), LATENCY);
   check("focus: Doors - Remove on the only other slot -> the slot grid", !!now?.matches("fieldset.slots"), describe(now));
   check("focus: Doors - the removals wrote door_mapping with only the front door left", canon(stored.config.door_mapping) === canon({ front: "binary_sensor.front_door" }), canon(stored.config.door_mapping));
   panel.hass = makeHass("en");
@@ -777,6 +868,42 @@ function describe(el) {
   now = await activate(kind("smoke_b"));
   check("focus: Settings biometrics - Remove on the only unknown kind -> the last kind's picker", !!now && inside(now, bm.shadowRoot.querySelector('.rows > li[data-kind="temperature"] jv-picker')), describe(now));
   box.remove();
+
+  // Muted Announcements (/settings/safety): the chips come from the jarvis/mutes reply, LATENCY ms later;
+  // every Unmute is disabled until it answers (the fixture's two entities and one category)
+  const muted = JSON.parse(JSON.stringify(fixture("jarvis_mutes")));
+  const backend = makeHass("en");
+  const fixtureCall = backend.callWS;
+  backend.callWS = async (msg) => {
+    if (msg.type !== "jarvis/mutes") return fixtureCall(msg);
+    wsCalls.push(msg.type);
+    if (msg.action === "unmute") {
+      await sleep(LATENCY);
+      if (msg.entity_id) muted.entities = muted.entities.filter((x) => x !== msg.entity_id);
+      if (msg.category) muted.categories = muted.categories.filter((x) => x !== msg.category);
+    }
+    return JSON.parse(JSON.stringify(muted));
+  };
+  panel.hass = backend;
+  panel.route = { prefix: PREFIX, path: "/settings/core" };
+  await settle(10);
+  panel.route = { prefix: PREFIX, path: "/settings/safety" };
+  await settle(20);
+  const mutes = deepAll(sr.querySelector("jarvis-view-settings"), "jarvis-tool-mutes")[0];
+  const unmute = (k) => mutes?.shadowRoot?.querySelector(`ul.chips > li[data-key="${k}"] button.jv-icon-btn`);
+  check("focus: Settings mutes - one chip per muted entity and category", mutes?.shadowRoot?.querySelectorAll("ul.chips > li").length === 3, String(mutes?.shadowRoot?.querySelectorAll("ul.chips > li").length));
+  now = await activate(unmute("entity:binary_sensor.back_door"));
+  check("focus: Settings mutes - while jarvis/mutes is in flight every Unmute is disabled", unmute("entity:light.hallway_strip")?.disabled === true && muted.entities.includes("binary_sensor.back_door"), describe(now));
+  await sleep(LATENCY);
+  await settle(10);
+  now = deepActive();
+  check("focus: Settings mutes - Unmute on the first chip -> the next chip's Unmute once the list came back", !!now?.matches("button.jv-icon-btn") && now.closest("li")?.dataset.key === "entity:light.hallway_strip" && !unmute("entity:binary_sensor.back_door"), describe(now));
+  now = await activate(unmute("category:appliances"), LATENCY);
+  check("focus: Settings mutes - Unmute on the last chip -> the previous chip's Unmute", !!now?.matches("button.jv-icon-btn") && now.closest("li")?.dataset.key === "entity:light.hallway_strip", describe(now));
+  now = await activate(unmute("entity:light.hallway_strip"), LATENCY);
+  check("focus: Settings mutes - Unmute on the only chip -> the entity picker", !!now && inside(now, mutes?.shadowRoot?.querySelector(".add jv-picker")) && muted.entities.length === 0 && muted.categories.length === 0, describe(now));
+  panel.hass = makeHass("en");
+  await settle(10);
 }
 
 // ── editor round trip: add a room via the store, undo, redo, save, reload ──
@@ -859,11 +986,18 @@ function describe(el) {
     const stored = JSON.parse(JSON.stringify(fixture("panel_data")));
     stored.config.floor_plan_bg = { "2f": "data:image/png;base64,TWO" };
     const sent = [];
+    /** floors whose write the backend refuses, and how long it takes to answer (the plan-file import below) */
+    const rejectFloors = new Set();
+    let bgLatency = 0;
+    const floorLatency = new Map(); // per-floor latency, over bgLatency (answers out of order)
     const backend = makeHass("en");
     const fixtureCall = backend.callWS;
     backend.callWS = async (msg) => {
       if (msg.type === "jarvis/set_floor_background") {
         sent.push(JSON.parse(JSON.stringify(msg)));
+        const latency = floorLatency.get(msg.floor) ?? bgLatency;
+        if (latency) await sleep(latency);
+        if (rejectFloors.has(msg.floor)) throw { code: "update_failed", message: "simulated disk full" };
         const bg = { ...stored.config.floor_plan_bg };
         if ("image" in msg) {
           if (msg.image) bg[msg.floor] = msg.image;
@@ -915,10 +1049,277 @@ function describe(el) {
     check("backgrounds: remove sends null image and alignment for that floor", sent.length === 1 && sent[0].image === null && sent[0].align === null && sent[0].floor === "1f");
     check("backgrounds: remove leaves the other floors' images", canon(stored.config.floor_plan_bg) === canon({ "2f": "data:image/png;base64,TWO" }) && !store.settings.bg["1f"], canon(stored.config.floor_plan_bg));
     check("backgrounds: floor_plan_bg is never written whole", !sent.some((m) => m.type === "jarvis/update_config"));
+
+    // a plan file with two background images, written floor by floor through the Import tab's handler
+    await sleep(400);
+    await settle(10);
+    const imp = planEditor()?.shadowRoot?.querySelector("jarvis-editor-import");
+    const bgCard = () => imp?.shadowRoot?.querySelector('section[aria-labelledby="imp-bg-h"]');
+    const planCard = () => imp?.shadowRoot?.querySelector('section[aria-labelledby="imp-file-h"]');
+    const planFile = (bg) => ({ target: { value: "", files: [{ text: async () => JSON.stringify({ jarvis_floor_plan: 1, floor_plan_bg: bg }) }] } });
+    /** wait for confirmDialog's <jv-confirm> and press its confirm button */
+    const acceptConfirm = async () => {
+      for (let waited = 0; waited < 2000; waited += 10) {
+        const btn = document.body.querySelector("jv-confirm")?.shadowRoot?.querySelector("[data-autofocus]");
+        if (btn) {
+          btn.click();
+          return true;
+        }
+        await sleep(10);
+      }
+      return false;
+    };
+    const ONE = "data:image/png;base64,T05F", TWO = "data:image/png;base64,VFdP";
+    const two = { "1f": ONE, "2f": TWO, _align: { "1f": { x: 1, y: 2, w: 300 } } };
+    const label = (f) => store.floorLabel(f);
+    check("backgrounds: the Import tab is mounted", !!imp && !!bgCard() && !!planCard());
+    sent.length = 0;
+    rejectFloors.clear();
+    rejectFloors.add("2f");
+    bgLatency = LATENCY;
+    let run = imp?._onPlanFile(planFile(two));
+    check("backgrounds: plan file - 'Also import 2 background images?' is confirmed", await acceptConfirm());
+    await sleep(LATENCY / 2);
+    await settle(2);
+    const upload = bgCard()?.querySelector(".actions .jv-btn");
+    const bgButtons = [...(bgCard()?.querySelectorAll("button") ?? [])];
+    check("backgrounds: plan file - while its writes are in flight the background card is busy (Upload / Remove / Align disabled)",
+      imp?._busy === "bg" && upload?.getAttribute("aria-busy") === "true" && bgButtons.length > 0 && bgButtons.every((b) => b.disabled), `busy=${imp?._busy} ${bgButtons.map((b) => `${b.textContent.trim()}:${b.disabled}`).join(", ")}`);
+    await run;
+    await settle(10);
+    const noticeText = () => planCard()?.querySelector("ha-alert, [role='alert']")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+    check("backgrounds: plan file - one set_floor_background per floor, with that floor's alignment only",
+      sent.length === 2 && sent.every((m) => m.type === "jarvis/set_floor_background") && sent[0].floor === "1f" && sent[0].image === ONE && canon(sent[0].align) === canon({ x: 1, y: 2, w: 300 }) && sent[1].floor === "2f" && sent[1].image === TWO && !("align" in sent[1]),
+      JSON.stringify(sent).slice(0, 240));
+    check("backgrounds: plan file - a partial failure names the failed floor (only)",
+      noticeText().includes(`Imported 1 of 2 background images; ${label("2f")} failed — simulated disk full`) && !noticeText().includes(label("1f")), noticeText());
+    check("backgrounds: plan file - busy cleared after the loop, the stored floor kept", imp?._busy === "" && !bgCard()?.querySelector(".actions .jv-btn")?.disabled && stored.config.floor_plan_bg["1f"] === ONE, `busy=${imp?._busy}`);
+    sent.length = 0;
+    rejectFloors.add("1f");
+    run = imp?._onPlanFile(planFile(two));
+    await acceptConfirm();
+    await run;
+    await settle(10);
+    check("backgrounds: plan file - every floor failing shows the plain failure notice", sent.length === 2 && noticeText().includes("Image import failed — simulated disk full") && !/Imported \d+ of/.test(noticeText()), noticeText());
+
+    // the loop owns the background card: an align tool open when it starts is cancelled first (its Done /
+    // Enter would commit mid-loop), an alignment that does end inside the loop releases only its own busy
+    // claim, and a second Import JSON is ignored meanwhile - focus stays on it (aria-disabled, not disabled)
+    rejectFloors.clear();
+    bgLatency = 150;
+    sent.length = 0;
+    await sleep(400);
+    await settle(10);
+    planCanvas()?.setTool({ id: "bg-align", order: 8.5, hits: ["*"], render: () => null });
+    await settle(5);
+    const alignWasOpen = planCanvas()?.tool?.id === "bg-align";
+    run = imp?._onPlanFile(planFile(two));
+    await acceptConfirm();
+    await sleep(bgLatency / 2);
+    await settle(2);
+    check("backgrounds: plan file - an open align tool is cancelled before the backgrounds are written", alignWasOpen && !planCanvas()?.tool && imp?._busy === "bg", `tool=${planCanvas()?.tool?.id} busy=${imp?._busy}`);
+    const importJson = [...(planCard()?.querySelectorAll(".actions .jv-btn") ?? [])].find((b) => /Import JSON/.test(b.textContent || ""));
+    const planInput = imp?.shadowRoot?.querySelector("#imp-plan-file");
+    let picked = 0;
+    if (planInput) planInput.click = () => { picked += 1; };
+    importJson?.focus();
+    importJson?.click();
+    await settle(2);
+    if (planInput) delete planInput.click;
+    check("backgrounds: plan file - Import JSON is ignored while busy, aria-disabled and still focused",
+      !!importJson && picked === 0 && importJson.getAttribute("aria-disabled") === "true" && !importJson.disabled && deepActive() === importJson, `picked=${picked} aria-disabled=${importJson?.getAttribute("aria-disabled")} ${describe(deepActive())}`);
+    const alignRun = imp?._writeAlign("1f", { x: 0, y: 0, w: 120 });
+    const alignBusy = imp?._busy;
+    await alignRun;
+    check("backgrounds: plan file - an alignment ending inside the loop leaves the loop's busy state", alignBusy === "align" && imp?._busy === "bg", `during=${alignBusy} after=${imp?._busy} sent=${sent.length}`);
+    await run;
+    await settle(10);
+    check("backgrounds: plan file - busy cleared once the loop ends", imp?._busy === "" && sent.length === 3 && importJson?.getAttribute("aria-disabled") === "false", `busy=${imp?._busy} sent=${sent.length}`);
+
+    // overlapping writes of floor_plan_bg: the earlier (1f) is refused, the later (2f) confirmed -> the
+    // editor shows the 2f image and the stored 1f one, not the refused 1f image the later write's overlay held
+    await sleep(400);
+    await settle(10);
+    bgLatency = 40;
+    rejectFloors.add("1f");
+    const stored1f = stored.config.floor_plan_bg["1f"];
+    const X1 = "data:image/png;base64,WDE=", X2 = "data:image/png;base64,WDI=";
+    const w1 = store.writeFloorBackground("1f", { image: X1 });
+    const w2 = store.writeFloorBackground("2f", { image: X2 });
+    const both = await Promise.all([w1, w2]);
+    check("backgrounds: overlapping writes - the refused earlier floor is dropped, the confirmed later one shown",
+      both[0] === false && both[1] === true && store.settings.bg["2f"] === X2 && store.settings.bg["1f"] === stored1f && store.settingStatus.floor_plan_bg?.level === "saved",
+      `${JSON.stringify(both)} 1f=${String(store.settings.bg["1f"]).slice(0, 40)} 2f=${String(store.settings.bg["2f"]).slice(0, 40)} ${JSON.stringify(store.settingStatus.floor_plan_bg)}`);
+    rejectFloors.clear();
+
+    // the later write (2f) answers first while the earlier (1f) is still in flight: both floors stay
+    // shown (writes to different floors are independent), and 1f's late success folds in, not dropped
+    await sleep(400);
+    await settle(10);
+    floorLatency.set("1f", 160).set("2f", 20);
+    const Y1 = "data:image/png;base64,WTE=", Y2 = "data:image/png;base64,WTI=";
+    const v1 = store.writeFloorBackground("1f", { image: Y1 });
+    const v2 = store.writeFloorBackground("2f", { image: Y2 });
+    await v2;
+    const midBg = { ...store.settings.bg };
+    await v1;
+    check("backgrounds: out-of-order answers - the in-flight earlier floor stays shown when the later one answers first",
+      midBg["1f"] === Y1 && midBg["2f"] === Y2, `1f=${String(midBg["1f"]).slice(0, 40)} 2f=${String(midBg["2f"]).slice(0, 40)}`);
+    check("backgrounds: out-of-order answers - the earlier floor's late success is kept, status saved",
+      store.settings.bg["1f"] === Y1 && store.settings.bg["2f"] === Y2 && store.settingStatus.floor_plan_bg?.level === "saved",
+      `1f=${String(store.settings.bg["1f"]).slice(0, 40)} 2f=${String(store.settings.bg["2f"]).slice(0, 40)} ${JSON.stringify(store.settingStatus.floor_plan_bg)}`);
+    floorLatency.clear();
+    bgLatency = 0;
+
+    // Remove background goes away with the image: keyboard focus moves to the upload button in its place
+    await sleep(400);
+    await settle(10);
+    const removeBg = [...(bgCard()?.querySelectorAll(".actions .jv-btn") ?? [])].find((b) => /Remove background/.test(b.textContent || ""));
+    removeBg?.focus();
+    removeBg?.click();
+    const removeConfirmed = await acceptConfirm();
+    for (let waited = 0; waited < 1000 && bgCard()?.querySelector(".actions .jv-btn.danger-text"); waited += 10) await sleep(10);
+    await settle(10);
+    check("backgrounds: after Remove background, focus is on the upload button that took its place",
+      !!removeBg && removeConfirmed && !bgCard()?.querySelector(".actions .jv-btn.danger-text") && deepActive()?.hasAttribute?.("data-bg-upload") === true, describe(deepActive()));
     panel.hass = makeHass("en");
     await sleep(400);
     await settle(10);
   }
+}
+
+// ── overlapping immediate-save writes of one key (the opacity slider's change, twice) ──────────────
+// Only the latest write started sets the status or reverts, and it reverts to the last CONFIRMED value
+// (no overlay when none was), never to the overlay it saw. The backend answers each write when told to.
+{
+  panel.route = { prefix: PREFIX, path: "/residence/editor/import" };
+  await settle(20);
+  const store = planEditor()?.store;
+  check("overlapping writes: store available", !!store);
+  if (store) {
+    const KEY = "floor_plan_bg_opacity";
+    const stored = JSON.parse(JSON.stringify(fixture("panel_data")));
+    const base = stored.config[KEY]; // 0.2 in the fixture
+    /** writes of KEY waiting for an answer, in send order */
+    const waiting = [];
+    const backend = makeHass("en");
+    const fixtureCall = backend.callWS;
+    backend.callWS = async (msg) => {
+      if (msg.type === "jarvis/update_config" && msg.key === KEY) {
+        return new Promise((resolve, reject) => waiting.push({
+          value: msg.value,
+          ok() { stored.config[KEY] = msg.value; resolve({ key: KEY, value: msg.value }); },
+          fail() { reject({ code: "update_failed", message: "simulated refusal" }); },
+        }));
+      }
+      if (msg.type === "jarvis/get_panel_data") {
+        wsCalls.push(msg.type);
+        return JSON.parse(JSON.stringify(stored));
+      }
+      return fixtureCall(msg);
+    };
+    panel.hass = backend;
+    await panel.refresh();
+    await settle(10);
+    const shown = () => store.settings.bgOpacity;
+    const level = () => store.settingStatus[KEY]?.level;
+    /** start two overlapping writes; resolves once both reached the backend */
+    const overlap = async (a, b) => {
+      waiting.length = 0;
+      const first = store.writeSetting(KEY, a);
+      const second = store.writeSetting(KEY, b);
+      for (let i = 0; i < 50 && waiting.length < 2; i++) await sleep(2);
+      return [first, second];
+    };
+    check("overlapping writes: the fixture's opacity is loaded", shown() === base, String(shown()));
+
+    // earlier confirmed, later refused (answered in that order): back to the earlier value, error
+    let [first, second] = await overlap(0.4, 0.6);
+    check("overlapping writes: both in flight -> the later value shows, saving", waiting.length === 2 && shown() === 0.6 && level() === "saving", `${waiting.length} ${shown()} ${level()}`);
+    waiting[0].ok();
+    await first;
+    check("overlapping writes: the earlier one confirmed while the later is in flight -> still the later value, saving", shown() === 0.6 && level() === "saving", `${shown()} ${level()}`);
+    waiting[1].fail();
+    const r1 = [await first, await second];
+    check("overlapping writes: earlier confirmed + later refused -> the confirmed earlier value, error", r1[0] === true && r1[1] === false && shown() === 0.4 && level() === "error", `${JSON.stringify(r1)} ${shown()} ${level()}`);
+    await sleep(400);
+    await settle(10);
+    check("overlapping writes: ... and the next snapshot agrees", shown() === 0.4 && stored.config[KEY] === 0.4, `${shown()} ${stored.config[KEY]}`);
+
+    // the same, the later refusal answering first: nothing confirmed yet -> the snapshot's value, then the
+    // earlier confirmation shows; the later write's error stands (the user's last change did not save)
+    [first, second] = await overlap(0.5, 0.7);
+    waiting[1].fail();
+    await second;
+    check("overlapping writes: later refused before the earlier answered -> no overlay (the snapshot's value), error", shown() === 0.4 && level() === "error", `${shown()} ${level()}`);
+    waiting[0].ok();
+    await first;
+    check("overlapping writes: ... the earlier confirmation then shows, the error stays", shown() === 0.5 && level() === "error", `${shown()} ${level()}`);
+    await sleep(400);
+    await settle(10);
+
+    // the reverse: earlier refused, later confirmed -> the later value throughout, saved
+    [first, second] = await overlap(0.3, 0.8);
+    waiting[0].fail();
+    await first;
+    check("overlapping writes: earlier refused while the later is in flight -> still the later value, saving (no revert)", shown() === 0.8 && level() === "saving", `${shown()} ${level()}`);
+    waiting[1].ok();
+    const r2 = [await first, await second];
+    check("overlapping writes: earlier refused + later confirmed -> the later value, saved", r2[0] === false && r2[1] === true && shown() === 0.8 && level() === "saved", `${JSON.stringify(r2)} ${shown()} ${level()}`);
+    await sleep(400);
+    await settle(10);
+    check("overlapping writes: ... and the next snapshot agrees", shown() === 0.8 && stored.config[KEY] === 0.8, `${shown()} ${stored.config[KEY]}`);
+    panel.hass = makeHass("en");
+    await panel.refresh();
+    await settle(10);
+  }
+}
+
+// ── narrow editor: the canvas is as tall as the fitted plan; the grid fills what the svg shows ──
+// jsdom has no layout: the CSS that sizes the svg and the ratio the canvas sets on it are asserted,
+// and a letterboxed box is simulated by giving the svg a client rect taller than the plan needs.
+{
+  panel.route = { prefix: PREFIX, path: "/residence/editor/rooms" };
+  await settle(20);
+  const wide = planCanvas();
+  const wideRule = wide ? flatRules(ownCss(wide.shadowRoot)).find((r) => r.selector === "svg") : null;
+  check("editor canvas: the wide svg keeps its clamp(360px, 65vh, 820px) height", !!wideRule && /height:\s*clamp\(360px,\s*65vh,\s*820px\)/.test(wideRule.decls), wideRule?.decls);
+  panel.narrow = true;
+  await settle(20);
+  const canvas = planCanvas();
+  const svgEl = canvas?.shadowRoot?.querySelector("svg");
+  check("narrow editor: the canvas is narrow", canvas?.hasAttribute("narrow") === true);
+  canvas?.fit();
+  await settle(5);
+  const fitted = canvas?.fittedViewBox;
+  const ratioOf = () => Number(/--jv-plan-ratio:\s*([\d.]+)/.exec(svgEl?.getAttribute("style") || "")?.[1]);
+  check("narrow editor: the svg carries the auto-fit viewBox's aspect ratio", !!fitted && Math.abs(ratioOf() - fitted.w / fitted.h) < 1e-3, `style="${svgEl?.getAttribute("style")}" fitted=${JSON.stringify(fitted)}`);
+  const rule = canvas ? flatRules(ownCss(canvas.shadowRoot)).find((r) => r.selector === ":host([narrow]) svg") : null;
+  check("narrow editor: the narrow svg height follows that ratio, at least 260 px and at most min(70vh, 520px)",
+    !!rule && /height:\s*auto/.test(rule.decls) && /aspect-ratio:\s*var\(--jv-plan-ratio/.test(rule.decls) && /min-height:\s*260px/.test(rule.decls) && /max-height:\s*min\(70vh,\s*520px\)/.test(rule.decls), rule?.decls);
+  const ratio = ratioOf();
+  canvas?.zoomBy(0.5);
+  canvas?.panBy(30, 10);
+  await settle(5);
+  check("narrow editor: zoom and pan leave the canvas's ratio (its size) alone", !!fitted && ratioOf() === ratio && canvas.viewBox.w !== fitted.w, `ratio ${ratio} -> ${ratioOf()}`);
+  if (canvas && svgEl) {
+    canvas.fit();
+    const vb = canvas.viewBox;
+    const W = 300, H = Math.round((W * vb.h) / vb.w) + 200; // taller than the plan: `meet` leaves bands above and below
+    svgEl.getBoundingClientRect = () => ({ left: 0, top: 0, right: W, bottom: H, width: W, height: H, x: 0, y: 0, toJSON() {} });
+    canvas.requestRender();
+    await settle(5);
+    const grid = svgEl.querySelector('g[data-layer="grid"] > rect');
+    const s = W / vb.w;
+    const want = { x: vb.x, y: vb.y - (H - vb.h * s) / 2 / s, w: vb.w, h: H / s };
+    const got = { x: Number(grid?.getAttribute("x")), y: Number(grid?.getAttribute("y")), w: Number(grid?.getAttribute("width")), h: Number(grid?.getAttribute("height")) };
+    const near = (a, b) => Math.abs(a - b) < 1e-6 * Math.max(1, Math.abs(b));
+    check("letterboxed canvas: the grid covers the whole svg (the bands above and below the plan too)", near(got.x, want.x) && near(got.y, want.y) && near(got.w, want.w) && near(got.h, want.h) && got.h > vb.h, `grid ${JSON.stringify(got)} want ${JSON.stringify(want)}`);
+    delete svgEl.getBoundingClientRect;
+  }
+  panel.narrow = false;
+  await settle(10);
+  planCanvas()?.fit();
 }
 
 // ── sub-routes: /residence/editor stays with the Residence view ────────────
@@ -1048,12 +1449,17 @@ active.dispatchEvent(new window.CustomEvent("jarvis-navigate", { bubbles: true, 
 await settle(10);
 check("jarvis-navigate {view:'logs'} -> /jarvis/logs", window.location.pathname === `${PREFIX}/logs`, window.location.pathname);
 
-// jarvis-refresh from a view
+// jarvis-refresh from a view: exactly one fetch. The panel's 20 s poll is stopped around the window (and
+// restarted after) so a slow run cannot have it land inside the wait and add one.
+panel._stopTimer();
+await settle(10);
 const before = wsCalls.filter((t) => t === "jarvis/get_panel_data").length;
 sr.querySelector("[data-jv-view]").dispatchEvent(new window.CustomEvent("jarvis-refresh", { bubbles: true, composed: true }));
 await sleep(400);
 await settle(10);
-check("jarvis-refresh re-fetches the snapshot", wsCalls.filter((t) => t === "jarvis/get_panel_data").length === before + 1);
+const fetched = wsCalls.filter((t) => t === "jarvis/get_panel_data").length - before;
+panel._startTimer();
+check("jarvis-refresh re-fetches the snapshot (once)", fetched === 1, `${fetched} fetches`);
 
 // keyboard: ArrowRight on the tablist moves to the next view
 panel.route = { prefix: PREFIX, path: "/overview" };
@@ -1101,10 +1507,12 @@ check("recovery clears the alert", !sr.querySelector('[role="alert"]') && !sr.qu
 
 // ── completeness: every editor / tool element the bundle defines is asserted ─
 {
-  const asserted = new Set([...Object.values(SETTINGS_FIELD_EDITORS).flat(), ...Object.values(EDITOR_TABS), ...toolCardTags]);
+  // built from the checks that ran and passed, so a tag listed under a category the walk never visits
+  // (or one that failed to render) does not count
+  const asserted = new Set([...fieldEditorTags, ...editorTabTags, ...toolCardTags]);
   const pluggable = [...definedTags].filter((tag) => /^jarvis-(editor|tool)-/.test(tag));
   const unasserted = pluggable.filter((tag) => !asserted.has(tag));
-  check(`completeness: each of the ${pluggable.length} jarvis-editor-* / jarvis-tool-* elements the bundle defines is asserted (SETTINGS_FIELD_EDITORS, EDITOR_TABS or a tool card)`,
+  check(`completeness: each of the ${pluggable.length} jarvis-editor-* / jarvis-tool-* elements the bundle defines rendered in a check that ran (SETTINGS_FIELD_EDITORS, EDITOR_TABS or a tool card)`,
     definedTags.has("jarvis-panel") && pluggable.length > 0 && unasserted.length === 0, unasserted.join(", "));
 }
 

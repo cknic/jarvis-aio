@@ -15,7 +15,8 @@ option labels, help text, confirm text, suggestions, label overrides) are allowe
 so the UI is not worse than the old tab.
 
 Scaffold the view is built on (already in `frontend/src/`): the element is `<jarvis-view-settings>`
-(`src/views/settings.ts`, currently a stub to replace; extra files go under `src/views/settings/*.ts`),
+(`src/views/settings.ts`; its helpers are `src/views/settings/field.ts` (the row), `presentation.ts`,
+`coerce.ts`, `registry.ts` (the Phase 3 plug-in registry, settings-tools.md §3) and `tools/**`),
 extends `JarvisView` (`src/views/view-base.ts`) which gives `hass`, `narrow`, `data` (the
 `jarvis/get_panel_data` snapshot the panel shell refreshes every 20 s), `route`, `subPath`, `refresh()`,
 `navigate(view, path)`, `ws<T>(type, payload)`. Translations: `t(key, vars)`, `loadLanguage()`,
@@ -31,16 +32,17 @@ schema already exist in `src/types.ts` (`ConfigSchema`, `ConfigField`, `FieldKin
 
 ## 1. Purpose
 
-Let an admin read and change every panel-writable JARVIS setting (195 keys on this branch) from one place:
+Let an admin read and change every panel-writable JARVIS setting (196 keys on this branch) from one place:
 grouped by the catalogue's category, searchable, in HA's own light/dark theme with native HA form controls,
 with immediate per-field save feedback (saving / saved / failed). It replaces the old eight-section settings
 tab whose cards were hand-written per key.
 
 The bespoke, non-key/value tools of the old tab (live model lists, governance switches, operational-mode
 chips, mutes, document library, camera rename/location, doorbell training, diagnostics buttons, floor-plan
-editor, …) are **not** in this view in Phase 2. Where an old card mixed plain settings with a tool, the plain
-settings are ported through the catalogue and the tool is listed in §7 "Dropped to Phase 3"; the view renders
-a short "Not yet ported" note per category (§4.1).
+editor, …) were **not** in this view in Phase 2. Where an old card mixed plain settings with a tool, the plain
+settings are ported through the catalogue and the tool is listed in §7 "Dropped to Phase 3". **Phase 3:**
+those tools now exist — as field editors and tool cards inside this view (settings-tools.md) or in their own
+views — and the per-category "Not yet ported" note became "Elsewhere in the panel" (§4.1).
 
 ---
 
@@ -181,14 +183,19 @@ already persisted): row status "Saved — appliance monitor reload failed: {mess
 ### 2.5 Translations
 
 `t()` from `src/i18n.ts`; dictionaries at `/jarvis_panel_static/i18n/<lang>.json` keyed by the exact English
-string (23 files, 337 keys). The panel shell loads the language from `data.config.ui_language` /
+string (337 keys in 23 files when this spec was written; since Phase 3, 22 language files carrying all 1185
+panel keys — `frontend/i18n-missing.json`). The panel shell loads the language from `data.config.ui_language` /
 `hass.language` after each snapshot (`_ensureLanguage`). When the user changes `ui_language` in this view:
 `await loadLanguage(resolveLanguage(newValue, hass.language))` **first**, then save, then `refresh()` — the
 strings must switch before the re-render (old panel issue #55 race). Mechanism and files are unchanged.
 
-### 2.6 Commands the old tab used that this view does NOT call (reference for Phase 3)
+### 2.6 Commands the old tab used that the generic view does NOT call (reference for Phase 3)
 
-Exact contracts so the Phase 3 agent need not re-read the old panel.
+Exact contracts so the Phase 3 agent need not re-read the old panel. Phase 3 status: `list_models`,
+`get_enforcement` / `set_enforcement`, `energy`, `hazard`, `mutes`, `voice_confirm_test` and the service
+calls are now called by this view's tool cards / editors (settings-tools.md); `mode` lives on Overview,
+`biometrics` on People, `diagnostics` / `get_calibration` on Logs, `documents` / `semantic_search` on
+Documents, `rename_camera` / `camera_location` on Cameras.
 
 | type | request (voluptuous) | response (`send_result`) | old UI |
 |---|---|---|---|
@@ -247,11 +254,14 @@ groq/openai/gemini/anthropic), `notify_service`, `appliance_profile` (JSON strin
 | `list` | `ha-textarea` (`<textarea>`), one item per line (commas also accepted) | per-field **Save** button (`list`/`json` are the only kinds with one) | `string[]` of trimmed, non-empty, de-duplicated lines |
 | `json` | `ha-textarea` (`<textarea class="jv-mono">`) pre-filled with `JSON.stringify(value, null, 2)`, live `JSON.parse` validation | **Save** button, disabled while invalid | the parsed object/array |
 
-One Lit component `<jv-setting-field .field .value .suggestions>` (new, under `src/views/settings/`)
-switches on `field.kind` and emits `value-changed` (`detail: {key, value}`); the view owns saving. A row
-shows: label (`t(LABEL_OVERRIDE[key] ?? field.label)`), the key in `.jv-mono` muted text, the "HA entity"
-badge (`jv-state-badge level="info"`) when `expose`, help text (§3.4), the control, a "Default: {value}"
-hint when the value differs from `default`, and a status slot (Saving… / Saved ✓ / error / warning).
+One Lit component `<jarvis-config-field .field .value …>` (`src/views/settings/field.ts`) switches on
+`field.kind` — unless a registered field editor matches the key (settings-tools.md §3.2) — and emits
+`field-change` (`detail: {key, value}`, already coerced to the kind) and `field-reset` (`{key}`); the view
+owns saving. A row shows: label (`t(LABEL_OVERRIDE[key] ?? field.label)`), the key in `.jv-mono` muted text
+(hidden unless the toolbar's "Show keys" toggle is on), the "HA entity" badge (`jv-state-badge level="info"`)
+when `expose`, help text (§3.4), the control, a "Default: {value}" hint with a "Reset to default" button
+when the value differs from `default`, and a status slot (Saving… / Saved ✓ / error / warning). (The
+optional `ha-slider` of the `float` row is not implemented.)
 
 ### 3.2 Reading the current value
 
@@ -441,8 +451,8 @@ matches it (internal flag written by the dashboard's welcome card).
 │   Learning (26)               │ </jv-section>                                               │
 │   Safety & Energy (20)        │ <jv-section heading="Not yet ported"> one line per §7 row  │
 │   Cameras (17)                │    that belongs to this category </jv-section>              │
-│   Home & Extras (27)          │                                                             │
-│   Governance (7)              │                                                             │
+│   Home & Extras (27)          │   (Phase 3: tool cards render ABOVE the fields section;     │
+│   Governance (8)              │    "Elsewhere in the panel" replaces "Not yet ported")      │
 │   Other (n)  ← only if n > 0  │                                                             │
 └───────────────────────────────┴─────────────────────────────────────────────────────────────┘
 ```
@@ -500,7 +510,8 @@ Switching category: `this.navigate("settings", category)` (the shell does `pushS
 * Field rows single-column: label + badge, help, control full width; the monospace key is hidden unless the
   overflow menu's "Show keys" is on.
 * `list`/`json` textareas full width, 6 rows, Save right-aligned beneath.
-* "Not yet ported" collapses into an `ha-expansion-panel` (fallback `<details>`), closed by default.
+* "Not yet ported" collapses into an `ha-expansion-panel` (fallback `<details>`), closed by default. (Phase 3:
+  replaced by the "Elsewhere in the panel" card, rendered as a plain list.)
 * Primary content on mobile: the field list of the selected category.
 
 ### 4.5 Theme
@@ -527,7 +538,8 @@ font via `.jv-mono`. No literal colours, fonts or images.
 | A10 | Search | typing | none | – | – | – |
 | A11 | Switch category | rail/chip click | `navigate("settings", category)` | – | – | – |
 | A12 | Retry | button in error state | A1 again | – | – | – |
-| A13 | Reset to default | row overflow item (shown when value ≠ default) | `update_config {key, value: field.default}` | – | as A2 | as A2 |
+| A13 | Reset to default | the "Reset to default" button in the row's "Default: {value}" hint (shown when value ≠ default; hidden for editors registered with `noReset`) | `update_config {key, value: field.default}` | – | as A2 | as A2 |
+| A14 | Open a tool card / "Elsewhere in the panel" link | deep link `/settings/<cat>/tool:<id>` / button | none (the card fetches on first `active`) / `navigate(view, path)` | – | card scrolled into view and flashed | – |
 
 Saves are optimistic per field: only that control is disabled while in flight ("Saving…"); different keys may
 save concurrently; a second change to the same key while in flight is queued and sent after the first
@@ -558,6 +570,15 @@ resolves. After any success the view re-fetches `jarvis/config_schema` (one call
 
 Rendered as "Not yet ported" lines under the category in brackets. The plain key/value parts of each old
 card **are ported** through the catalogue; only the tool part is deferred.
+
+> **Phase 3 status.** Every row below is now ported: as a field editor or tool card in this view
+> (settings-tools.md — AI Models, governance switches, mode-binding pickers, energy, hazard, briefings,
+> mutes, sentinel rules, pairings, announcement speakers, entity / domain / label pickers, appliances,
+> voice confirmation test and entries, diagnostics buttons, the biometric map) or in its own view (Overview
+> for Operational Mode; Logs for System Diagnostics and Observer stats; Documents; Cameras incl. Doorbell
+> Training; People for faces, voices and Wellbeing Context; the floor-plan editor at
+> `/jarvis/residence/editor`). `presentation.ts` `ELSEWHERE` renders the view-hosted ones as "Elsewhere in
+> the panel" links. The Diagnostics buttons moved to General (settings-tools.md §4.18).
 
 | old card / feature | category | why not in Phase 2 | ported keys |
 |---|---|---|---|
@@ -712,16 +733,20 @@ until added to all 23 files.
 
 ### 8.4 Not-yet-ported lines
 
-`"{name} — {why} — Phase 3"` from §7; English only in Phase 2.
+`"{name} — {why} — Phase 3"` from §7; English only in Phase 2. Phase 3: replaced by "Elsewhere in the
+panel" (`Elsewhere in the panel` heading; each line `{name}` as a link button + `— {why}`). Since Phase 3
+every panel key is translated in all 22 language files (`frontend/i18n-missing.json`); the "de.json"
+columns above record what existed before the port.
 
 ---
 
 ## 9. Risks
 
-1. **`jarvis/config_schema` is uncommitted work in progress.** It exists in the working tree
-   (`websocket.ws_config_schema`, `config_apply.build_schema`, `tests/unit/test_config_schema_ws.py`,
-   `docs/native-entities.md`) but not in `HEAD` (`47bede5`). The view agent must build against that working
-   tree and handle `unknown_command` (§6) for a backend without it.
+1. **`jarvis/config_schema` was uncommitted work in progress** when this spec was written. It is now
+   registered (`websocket.ws_config_schema`, admin-only, `config_apply.build_schema`,
+   `tests/unit/test_config_schema_ws.py`); the view still handles `unknown_command` (§6) for an older
+   backend. `frontend/dev/fixtures/config_schema.json` is generated from the live catalogue by
+   `frontend/scripts/config-schema-fixture.py` (defaults plus a few `DEMO_VALUES`).
 2. **`src/types.ts` disagrees slightly with the wire.** `ConfigField.options` is typed
    `Array<FieldOption | string> | null`; the backend sends `string[]`. Accept both (`typeof o === "string" ? o : o.value`).
 3. **Type drift between catalogue and stored data.** `values` are coerced on read, but writes are not
@@ -765,7 +790,10 @@ Columns: `options / min..max step` is `options` for `enum`, `min..max step` for 
 otherwise. `default` is JSON. The wire adds `category` per section and `options`/`min`/`max`/`step` as
 `null` where not applicable.
 
-Total: 195 fields. Per category: core 76, voice 22, learning 26, safety 20, cameras 17, home 27, governance 7.
+Total: 195 fields when generated. Per category: core 76, voice 22, learning 26, safety 20, cameras 17, home 27,
+governance 7. Since then upstream 9.40.0 added `goals_kernel_authoritative` (bool, default `true`, label
+"Kernel plan authoritative for goals", governance) — 196 fields, governance 8. The regenerated
+`dev/fixtures/config_schema.json` is the current list; this appendix is not kept in sync by hand.
 
 ### category `core` (76)
 
@@ -985,7 +1013,7 @@ Total: 195 fields. Per category: core 76, voice 22, learning 26, safety 20, came
 | `movie_media_player` | str | `""` |  | Movie media player |  |
 | `movie_dim_pct` | int | `15` | 0..100 step 1 | Movie dim level (%) |  |
 
-### category `governance` (7)
+### category `governance` (7 + `goals_kernel_authoritative`)
 
 | key | kind | default | options / min..max step | label | expose |
 |---|---|---|---|---|---|

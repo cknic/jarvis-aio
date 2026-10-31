@@ -645,8 +645,9 @@ export class JarvisViewPeople extends JarvisView {
     this._bioOverride = on;
     try {
       // Write through update_config (runtime_config + config.json + config-changed
-      // signal) so Settings and its Wellbeing card see the new value; the legacy
-      // enable/disable actions only touch config.json. Then re-read the status.
+      // signal) so Settings and its Wellbeing card see the new value - the same
+      // path jarvis/biometrics enable / disable take (config_apply) - then re-read
+      // the status.
       await this.ws("jarvis/update_config", { key: "biometrics_enabled", value: on });
       const res = await this.ws<BiometricsResponse>("jarvis/biometrics", { action: "status" });
       this._applyBio(res);

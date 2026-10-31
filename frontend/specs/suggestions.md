@@ -8,6 +8,9 @@ here because they are the same feature family (what JARVIS has learned / is work
 does not carry them. Everything a view implementer needs is in this file; do not read the old panel.
 
 Route: `/jarvis/suggestions` (HA `route.path === "/suggestions"`). Nav label: **Suggestions**. Admin-only (whole panel is).
+Implementation: `<jarvis-view-suggestions>` (`src/views/suggestions.ts`, a thin layout that owns the toast region) over
+`src/views/suggestions/`: `suggestion-list.ts` (`<jarvis-suggestions-list>`, L1), `goals-card.ts`
+(`<jarvis-suggestions-goals>`, L2), `learning-card.ts` (`<jarvis-suggestions-learning>`, L3), `format.ts`, `types.ts`.
 
 ---
 
@@ -23,9 +26,9 @@ it last analysed, with a manual "Analyze now" trigger that reports what it found
 
 ## Data
 
-All commands are HA WebSocket commands sent with `hass.callWS({...})`. Every one is `@websocket_api.require_admin`.
-Error responses arrive as a rejected promise whose `.message` is the handler's error message string and `.code` the
-error code given below.
+All commands are HA WebSocket commands sent through the panel's `ws(hass, type, payload)` helper (`src/ws.ts`, wrapping
+`hass.callWS`). Every one is `@websocket_api.require_admin`. Error responses arrive as a rejected `WsError` whose
+`.message` is the handler's error message string and `.code` the error code given below.
 
 ### D1. `jarvis/get_panel_data` (snapshot; the view reads only `suggestions` and `goals`)
 
@@ -187,8 +190,8 @@ Response (`cognitive_core.status()`), fields this view uses:
 ```
 Failure path (handler catches): `{ running:false, error:str, learning:{} }` sent via `send_result` (not an error frame).
 
-When fetched: once when the view is first shown, and again after every successful D5 run. The old panel also refreshed
-it on every 20 s poll; that is fine but optional here (it is cheap: two sqlite counts).
+When fetched: once when `hass` first arrives, again on every new snapshot (the shell's 20 s tick — cheap: two sqlite
+counts), and after every D5 run.
 
 ### D5. `jarvis/run_analysis` ("Analyze now")
 
@@ -237,8 +240,8 @@ None. The old suggestions tab, Goals card and Analyze button used no service cal
 
 ## Layout
 
-Single scrollable column at phone width; two columns ≥ 900 px (left: L1 + L2; right: L3 + L4). Cards use the shell's
-standard `ha-card`-style surface and HA theme tokens (no custom colours beyond semantic success/warning/error).
+Single scrollable column at phone width; two columns ≥ 900 px (left: L1 + L2; right: L3 + L4). Cards are `<jv-section>`
+surfaces with `--jv-*` tokens only (DESIGN.md); chips are `<jv-state-badge>`, key/value rows `<jv-kv>`.
 
 ### L1. Suggestions card — PRIMARY (first on mobile)
 
@@ -313,9 +316,8 @@ Header: **"Routine learning"**. Body from D4:
   - After any completed run: refetch D4 and ask the shell to refresh the snapshot (new suggestions appear in L1).
 
 ### L4. Footer link
-Text link **"Learning settings"** → navigates to `/jarvis/settings` (section `learning` if the settings view supports
-anchors; otherwise just the settings route) using `history.pushState(null, "", url)` +
-`window.dispatchEvent(new CustomEvent("location-changed", {bubbles:true, composed:true}))`.
+Text link **"Learning settings"** → `this.navigate("settings", "learning")` (the shell turns that `jarvis-navigate`
+into `/jarvis/settings/learning`, which opens the Learning category).
 
 Mobile primary order: L1, L2, L3, L4.
 
@@ -346,9 +348,10 @@ Disable the clicked control(s) while a call is in flight; never fire two D2 call
   press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is
   ever created without your say-so."** Count chip hidden.
 - **Empty goals**: list area shows **"No goals yet. Add one above, or ask JARVIS to set one."**; input stays usable.
-- **Error** (snapshot fetch failed, shell exposes an error): L1/L2 show an inline alert **"Couldn't load panel data"**
-  with the shell's error text and a **"Retry"** button that asks the shell to refetch. L3 on D4 failure/`error` field:
-  show **"Learning status unavailable"** (+ `error` text when present); "Analyze now" remains enabled.
+- **Error** (snapshot fetch failed): handled by the **shell** for every view (an error alert with the message and a
+  "Retry" button above the view; the last snapshot stays rendered). L1/L2 render no error of their own (the string
+  "Couldn't load panel data" is not used). L3 on D4 failure/`error` field: show **"Learning status unavailable"** (+
+  `error` text when present); "Analyze now" remains enabled.
 - **Disabled**: D4 `running:false` → L3 shows a muted line **"Cognitive core is not running"**; keep "Analyze now"
   enabled (it still works; it only needs the state logger, and returns a reason if not). Suggestion/goal buttons are
   disabled only while their own call is in flight or after a successful A1/A2 until the next snapshot.
@@ -415,7 +418,11 @@ Routine learning
   "Learning status unavailable", "Cognitive core is not running"
 
 Shared
-- "Couldn't load panel data", "Retry"
+- (none: the snapshot error belongs to the shell)
+
+Toasts: the cards dispatch `jv-toast {message, tone}`; the view shows it as HA's toast (`hass-notification`) when
+`<home-assistant>` is defined, else in its own `aria-live="polite"` region for 6 s. Since Phase 3 every key is translated
+in all 22 language files (`frontend/i18n-missing.json`).
 
 Pluralisation: the old panel hand-pluralised (`suggestion`/`suggestions`, `pattern`/`patterns`, `event`/`events`,
 `entity`/`entities`). Keep the English plural forms above with counts; i18n files are keyed by exact string, so use
@@ -426,9 +433,9 @@ but avoid building strings by concatenating translated fragments.
 
 ## Dropped to Phase 3
 
-- **Per-person routines** (`jarvis/get_person_routines`, response `{routines: {person: [{id, pattern_type, description, confidence, occurrences, last_seen}]}}`): old panel showed them on the Memory tab, not here; belongs to the memory view.
+- **Per-person routines** (`jarvis/get_person_routines`, response `{routines: {person: [{id, pattern_type, description, confidence, occurrences, last_seen}]}}`): old panel showed them on the Memory tab, not here; the Memory view shows them (memory.md §3.2).
 - **Suggestion threshold / calibration readout** (`jarvis/get_calibration` → `suggestion_threshold {base, effective, learned_delta}`, `suggestion` outcome rate): dashboard diagnostics in the old panel; low value for the review flow.
-- **Learning toggles & thresholds** (`pattern_learn_*`, `pattern_include_entities`, `pattern_min_occurrences`, `pattern_confidence`, `suggest_garage_confirmation`, `adaptive_suggestion_threshold`): stay in the settings view; this view only links there.
+- **Learning toggles & thresholds** (`pattern_learn_*`, `pattern_include_entities`, `pattern_min_occurrences`, `pattern_confidence`, `suggest_garage_confirmation`, `adaptive_suggestion_threshold`): stay in the settings view; this view only links there. The calibration readout is on the Logs view (System Diagnostics › Judgment calibration).
 - **Goal `title` / `interval_min` inputs and step-level display**: backend supports them (D3 schema; `steps[]` in the snapshot) but the old panel never exposed them; a steps accordion is a Phase 3 nicety.
 - **Suggestion history** (approved / installed / dismissed rows): no WS command returns them (`get_pending_suggestions` is pending-only); would need a backend change.
 - **Real YAML rendering of the automation payload**: payload is JSON; converting to YAML client-side needs a library and the backend may later change the shape; pretty JSON is enough for Phase 2.

@@ -389,53 +389,16 @@ export class JarvisViewCameras extends JarvisView {
     }
   }
 
-  /**
-   * jarvis/camera_location persists indoor_/outdoor_entities to config.json
-   * only, so runtime_config (what Settings › Cameras reads, and later saves
-   * back whole) keeps the pre-change lists. Apply the same pin to the
-   * effective lists and write them through update_config, which updates
-   * runtime_config and the file together. Best effort: the designation itself
-   * is already in force, so a failure here is not reported as a save failure.
-   */
-  private async _mirrorLocationLists(entity_id: string, mode: LocationMode): Promise<void> {
-    try {
-      const schema = await this.ws<{ values?: Record<string, unknown> }>("jarvis/config_schema");
-      const values = schema?.values ?? {};
-      const asList = (v: unknown): string[] => {
-        let x = v;
-        if (typeof x === "string" && x.trim()) {
-          try {
-            x = JSON.parse(x);
-          } catch {
-            return [];
-          }
-        }
-        return Array.isArray(x) ? x.map((i) => String(i).trim()).filter(Boolean) : [];
-      };
-      const eid = entity_id.toLowerCase().trim();
-      const pin = (list: string[], on: boolean): string[] => {
-        const kept = list.filter((i) => i.toLowerCase() !== eid);
-        return on ? [...kept, eid] : kept;
-      };
-      const same = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
-      for (const [key, on] of [["indoor_entities", mode === "indoor"], ["outdoor_entities", mode === "outdoor"]] as const) {
-        const cur = asList(values[key]);
-        const next = pin(cur, on);
-        if (!same(cur, next)) await this.ws("jarvis/update_config", { key, value: next });
-      }
-    } catch {
-      /* best effort — see above */
-    }
-  }
-
   private async _onLocation(e: Event): Promise<void> {
     const { entity_id, mode } = (e as CustomEvent<{ entity_id: string; mode: LocationMode }>).detail;
     e.stopPropagation();
     if (this._rows[entity_id]?.saving) return;
     this._setRow(entity_id, { saving: true });
     try {
+      // the backend writes indoor_/outdoor_entities through config_apply.async_apply_many (runtime_config,
+      // config.json, coordinator, config-changed signal): Settings › Cameras shows the new lists from the
+      // next jarvis/config_schema read, the snapshot from the refresh() below
       const res = await this._write(() => this.ws<LocationResult>("jarvis/camera_location", { entity_id, mode }));
-      await this._write(() => this._mirrorLocationLists(entity_id, mode));
       if (Array.isArray(res?.cameras)) this._applyPatch({ cameras: res.cameras });
       else {
         // older backend without the list: patch the mode locally

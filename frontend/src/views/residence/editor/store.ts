@@ -82,6 +82,8 @@ const emptyDoc = (): EditorDoc => ({ floors: [], openings: {}, cameras: {}, pins
 type Baseline = Record<PlanKey, string>;
 const SAVED_STATUS_MS = 2500;
 const TOAST_MS = 4000;
+/** a held toast gets at least this long again once focus leaves it */
+const TOAST_RESUME_MS = 1500;
 /**
  * HA's websocket accepts messages up to aiohttp's default 4 MiB; a bigger
  * frame is rejected and the connection drops. Writes are refused client-side
@@ -126,6 +128,25 @@ export class EditorStore {
   private _doc: EditorDoc = emptyDoc();
   private _config: Record<string, unknown> = {};
   private _overlay: Record<string, unknown> = {};
+  /**
+   * Immediate-save writes per key (writeSetting / writeFloorBackground): the number of the latest one
+   * started and whether it has answered. Writes to one key can overlap (an opacity slider's `change`
+   * fires again before the first answer); while the latest is in flight it alone owns the key's overlay
+   * and status.
+   */
+  private _writes = new Map<string, { seq: number; done: boolean }>();
+  /**
+   * Per key, the last value a write CONFIRMED (and which write that was): what the latest write reverts
+   * the overlay to when it fails - never the overlay it happened to see when it started, which may be an
+   * earlier write the backend went on to refuse. No entry: the snapshot's value is the confirmed one.
+   */
+  private _confirmed = new Map<string, { seq: number; value: unknown }>();
+  /**
+   * Per key, the in-flight writes that patch the value rather than replace it (writeFloorBackground: the
+   * backend merges one floor), by write number. Writes to different floors are independent, so whatever
+   * the overlay falls back to keeps the floors still in flight on top of the confirmed dict.
+   */
+  private _patches = new Map<string, Map<number, (value: unknown) => unknown>>();
   private _settingsCache: EditorSettings | null = null;
   private _baseline: Baseline = this._emptyBaseline();
   private _baselineText = "";
@@ -141,6 +162,8 @@ export class EditorStore {
   /** bumped on every history mutation (push, undo, redo, reset) */
   private _historyRev = 0;
   private _timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** auto-dismissing toasts: id -> when it goes (running) or the ms it had left (held, see holdToast) */
+  private _toastClock = new Map<number, { due: number; left: number | null }>();
 
   /** true after the first snapshot was parsed */
   loaded = false;
@@ -372,7 +395,9 @@ export class EditorStore {
     if (!data) return;
     this.data = data;
     this._config = data.config || {};
+    // a key with no write in flight follows the snapshot again (it carries what the writes confirmed)
     for (const key of Object.keys(this._overlay)) if (this.settingStatus[key]?.level !== "saving") delete this._overlay[key];
+    for (const key of [...this._confirmed.keys()]) if (this.settingStatus[key]?.level !== "saving") this._confirmed.delete(key);
     const parsed = parseDoc(this._config);
     const baseline = this._baselineOf(parsed.doc);
     const text = this._joinBaseline(baseline);
@@ -523,9 +548,13 @@ export class EditorStore {
   /**
    * Immediate-save path for the non-plan keys (floor_plan_units,
    * floor_plan_bg_opacity, door_mapping and the house keys): optimistic
-   * overlay, per-key status (saving -> saved, auto-cleared; error reverts),
-   * `jarvis-refresh` on success. Resolves true on success. floor_plan_bg is
-   * NOT written whole: use writeFloorBackground().
+   * overlay, per-key status (saving -> saved, auto-cleared; error -> the
+   * overlay goes back to the last value a write confirmed, or is dropped when
+   * none did), `jarvis-refresh` on success. Writes to one key may overlap:
+   * only the latest one started sets the status or reverts (an earlier one
+   * failing under it changes nothing shown; it still resolves false).
+   * Resolves true on success. floor_plan_bg is NOT written whole: use
+   * writeFloorBackground().
    */
   async writeSetting(key: string, value: unknown): Promise<boolean> {
     // a frame over HA's websocket limit would drop the connection: refuse it here with a clear message
@@ -534,18 +563,15 @@ export class EditorStore {
       this._setStatus(key, { level: "error", message: t("This change is {size} MB; Home Assistant accepts at most {max} MB at once", { size: mb(bytes), max: mb(WS_FRAME_LIMIT) }) });
       return false;
     }
-    this._overlay[key] = value;
+    const seq = this._beginWrite(key, value);
     this._syncFloors();
-    this._setStatus(key, { level: "saving" });
     try {
       await ws(this.hass, "jarvis/update_config", { key, value });
-      this._setStatus(key, { level: "saved" }, SAVED_STATUS_MS);
+      this._confirmWrite(key, seq, () => value);
       this.refresh();
       return true;
     } catch (err) {
-      delete this._overlay[key];
-      this._syncFloors();
-      this._setStatus(key, { level: "error", message: WsError.from("jarvis/update_config", err).message });
+      this._failWrite(key, seq, WsError.from("jarvis/update_config", err).message);
       return false;
     }
   }
@@ -554,9 +580,12 @@ export class EditorStore {
    * Set / remove ONE floor's background image and / or alignment
    * (jarvis/set_floor_background merges that floor server-side, so only this
    * floor's image travels and each image - not all of them together - has to
-   * fit WS_FRAME_LIMIT). Same UX as writeSetting under the status key
-   * `floor_plan_bg`: the merged dict is the optimistic overlay, an error
-   * restores the previous overlay. Resolves true on success.
+   * fit WS_FRAME_LIMIT). Same UX and overlap rule as writeSetting under the
+   * status key `floor_plan_bg`: the merged dict is the optimistic overlay; a
+   * confirmed write merges its floor into the confirmed dict (the snapshot's
+   * when none is newer), and a failing latest write puts that back - so a
+   * floor an earlier, refused write had merged in does not stay shown.
+   * Resolves true on success.
    */
   async writeFloorBackground(floor: FloorKey, patch: FloorBackgroundPatch): Promise<boolean> {
     const key = "floor_plan_bg";
@@ -568,21 +597,85 @@ export class EditorStore {
       this._setStatus(key, { level: "error", message });
       return false;
     }
-    const had = key in this._overlay;
-    const prev = this._overlay[key];
-    this._overlay[key] = mergeFloorBackground(this.config[key], floor, patch);
-    this._setStatus(key, { level: "saving" });
+    const apply = (value: unknown): unknown => mergeFloorBackground(value, floor, patch);
+    const seq = this._beginWrite(key, apply(this.config[key]), apply);
     try {
       await ws<FloorBackgroundResult>(this.hass, "jarvis/set_floor_background", { floor, ...patch });
-      this._setStatus(key, { level: "saved" }, SAVED_STATUS_MS);
+      // the backend merged only this floor into what it had: do the same to what was confirmed so far
+      this._confirmWrite(key, seq, apply);
       this.refresh();
       return true;
     } catch (err) {
-      if (had) this._overlay[key] = prev;
-      else delete this._overlay[key];
-      this._setStatus(key, { level: "error", message: WsError.from("jarvis/set_floor_background", err).message });
+      this._failWrite(key, seq, WsError.from("jarvis/set_floor_background", err).message);
       return false;
     }
+  }
+
+  // ── overlapping immediate-save writes (one sequence per key) ────────────
+  /**
+   * Start a write of `key`: `overlay` is shown at once, the status says saving. `patch` marks a write
+   * that merges into the value (see _patches) rather than replacing it. Returns the write's number.
+   */
+  private _beginWrite(key: string, overlay: unknown, patch?: (value: unknown) => unknown): number {
+    const seq = (this._writes.get(key)?.seq ?? 0) + 1;
+    this._writes.set(key, { seq, done: false });
+    if (patch) {
+      if (!this._patches.has(key)) this._patches.set(key, new Map());
+      this._patches.get(key)!.set(seq, patch);
+    }
+    this._overlay[key] = overlay;
+    this._setStatus(key, { level: "saving" });
+    return seq;
+  }
+
+  /**
+   * Write `seq` of `key` succeeded: `next(confirmed)` is the key's value now (given the last confirmed
+   * one, else the snapshot's). For a replacing write an answer older than the last confirmation changes
+   * nothing; a patching write always folds in, whatever order the answers arrive in. The latest
+   * write shows it (without an earlier write's refused part) and "saved"; an earlier write only shows
+   * it once the latest has answered (it failed, so this is what the backend holds) and leaves the
+   * latest's error standing.
+   */
+  private _confirmWrite(key: string, seq: number, next: (confirmed: unknown) => unknown): void {
+    const prev = this._confirmed.get(key);
+    const patching = this._patches.get(key)?.delete(seq) ?? false;
+    if (patching || !prev || prev.seq < seq) {
+      this._confirmed.set(key, { seq: Math.max(prev?.seq ?? 0, seq), value: next(prev ? prev.value : this._config[key]) });
+    }
+    const latest = this._writes.get(key);
+    if (latest?.seq === seq) {
+      latest.done = true;
+      this._setStatus(key, { level: "saved" }, SAVED_STATUS_MS);
+    } else if (!latest?.done) {
+      return; // the latest write is still in flight: it owns the overlay and the status
+    }
+    this._overlay[key] = this._withPatches(key, this._confirmed.get(key)!.value);
+    this._syncFloors();
+    this._notify();
+  }
+
+  /** `value` with the key's still-in-flight patching writes applied on top, oldest first. */
+  private _withPatches(key: string, value: unknown): unknown {
+    const pending = this._patches.get(key);
+    if (!pending?.size) return value;
+    return [...pending.entries()].sort((a, b) => a[0] - b[0]).reduce((v, [, apply]) => apply(v), value);
+  }
+
+  /**
+   * Write `seq` of `key` failed. Only the latest write reverts: the overlay goes back to the last
+   * confirmed value (dropped when no write confirmed one: the snapshot shows again) and the status
+   * says error. An earlier write failing changes nothing shown.
+   */
+  private _failWrite(key: string, seq: number, message: string): void {
+    this._patches.get(key)?.delete(seq);
+    const latest = this._writes.get(key);
+    if (latest?.seq !== seq) return;
+    latest.done = true;
+    const confirmed = this._confirmed.get(key);
+    if (confirmed || this._patches.get(key)?.size) this._overlay[key] = this._withPatches(key, confirmed ? confirmed.value : this._config[key]);
+    else delete this._overlay[key];
+    this._syncFloors();
+    this._setStatus(key, { level: "error", message });
   }
 
   private _setStatus(key: string, status: SettingStatus | null, clearAfter = 0): void {
@@ -614,8 +707,33 @@ export class EditorStore {
     const id = ++this._toastSeq;
     this.toasts = [...this.toasts, { id, message, action, rev: this._historyRev }];
     this._notify();
-    if (ms > 0) this._timers.set(`toast:${id}`, setTimeout(() => this.dismissToast(id), ms));
+    if (ms > 0) this._armToast(id, ms);
     return id;
+  }
+  private _armToast(id: number, ms: number): void {
+    this._toastClock.set(id, { due: Date.now() + ms, left: null });
+    this._timers.set(`toast:${id}`, setTimeout(() => this.dismissToast(id), ms));
+  }
+  /**
+   * Hold / release a toast's auto-dismiss. The editor holds a toast while focus is inside it, so a
+   * keyboard user is never left on a toast that disappears under them (and has as long as they need
+   * to reach its Undo); on release it gets the time it had left, at least TOAST_RESUME_MS.
+   */
+  holdToast(id: number, held: boolean): void {
+    const clock = this._toastClock.get(id);
+    if (!clock) return; // gone, or never auto-dismissed
+    const key = `toast:${id}`;
+    if (held && clock.left == null) {
+      clearTimeout(this._timers.get(key));
+      this._timers.delete(key);
+      clock.left = Math.max(0, clock.due - Date.now());
+    } else if (!held && clock.left != null) {
+      this._armToast(id, Math.max(TOAST_RESUME_MS, clock.left));
+    }
+  }
+  /** The toasts whose auto-dismiss is held right now (the editor releases a hold whose toast lost focus). */
+  get heldToasts(): number[] {
+    return [...this._toastClock].filter(([, clock]) => clock.left != null).map(([id]) => id);
   }
   /** The toast's button: runs its action only while the history is still where the toast was shown, then dismisses it. */
   runToastAction(id: number): void {
@@ -626,6 +744,7 @@ export class EditorStore {
   dismissToast(id: number): void {
     clearTimeout(this._timers.get(`toast:${id}`));
     this._timers.delete(`toast:${id}`);
+    this._toastClock.delete(id);
     if (!this.toasts.some((t) => t.id === id)) return;
     this.toasts = this.toasts.filter((t) => t.id !== id);
     this._notify();
@@ -635,6 +754,7 @@ export class EditorStore {
   dispose(): void {
     for (const t of this._timers.values()) clearTimeout(t);
     this._timers.clear();
+    this._toastClock.clear();
     this.toasts = [];
   }
 }

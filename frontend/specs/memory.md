@@ -8,6 +8,8 @@ _forgetKnowledge/_fetchPersonRoutines/_renderPersonRoutines/_fetchBriefings/_ren
 The view agent should be able to implement this view from this document alone.
 
 Route: `/jarvis/memory` (tab id `memory`, tab label **Memory**). Admin-only like the whole panel.
+Implementation: `<jarvis-view-memory>` (`src/views/memory.ts`, with `src/views/memory/format.ts`,
+`styles.ts`, `types.ts`).
 
 ---
 
@@ -35,7 +37,8 @@ snapshot fields that exist but were not used).
 All commands are registered in `websocket.py::async_register` and decorated
 `@websocket_api.require_admin` + `@websocket_api.async_response`. On failure every handler calls
 `connection.send_error(msg["id"], <code>, str(exc))`, which `hass.callWS()` surfaces as a rejected
-promise whose value is an object `{code: string, message: string}` (NOT an `Error` — see Risks).
+promise whose value is an object `{code: string, message: string}` (NOT an `Error` — see Risks); the
+view calls through `this.ws()` (`src/ws.ts`), which normalises that into a `WsError {code, message}`.
 
 Type conventions below: `number(epoch)` = seconds since the Unix epoch as a float (Python
 `time.time()`), `string(iso-naive-utc)` = ISO-8601 with microseconds and **no** timezone suffix,
@@ -238,13 +241,14 @@ be empty on a healthy install.
 
 - `jarvis/search_memory` `{type, query: str (required), k?: int = 5}` → `{results: any[]}` —
   searches conversational memory. Registered but **never called by the old panel**. Not part of
-  this view.
+  this view; since Phase 3 the Documents view's "Conversation memory" card
+  (`<jarvis-docs-memory>`, `k: 8`) uses it (documents.md).
 - `jarvis/semantic_search` `{type, action: "status"|"enable"|"disable"|"test"}` and
   `jarvis/documents` `{type, action: "status"|"ingest"|"search"|"upload"|"scan_watch"|"delete", query?, filename?, content?}`
   — these powered the **Document Library** card (with its "Search engine: KEYWORD (FTS) /
-  SEMANTIC (Ollama)" toggle) in the old **Settings** tab, not the Memory tab. They are Phase 3
-  per the fork plan; because the old Memory tab never contained them, this view shows **no**
-  "not yet ported" note for them.
+  SEMANTIC (Ollama)" toggle) in the old **Settings** tab, not the Memory tab. Since Phase 3 they
+  live in the Documents view (documents.md); because the old Memory tab never contained them, this
+  view shows **no** note for them.
 
 ### 2.8 Services / settings
 
@@ -328,8 +332,8 @@ text, divider, primary color for accents, error color) — no literal colours.
   button disabled until both are non-empty, and ignore Enter while invalid.
 - While pending: disable the Teach button and inputs (prevent double submit).
 - Success (`ok === true`): replace the fact list with `res.facts`, update the count badge, clear
-  both text inputs (keep the subject selection), return focus to the *what* input. No toast is
-  required (the row appearing in the list is the feedback); a brief inline confirmation is fine.
+  both text inputs (keep the subject selection), return focus to the *what* input. No toast; a
+  brief inline confirmation `Got it - JARVIS will remember that.` (`role="status"`) is shown.
 - `ok === false` (store rejected it): keep the inputs, show an inline error under the form:
   *Couldn't save that fact.* Still replace the list with `res.facts` if present.
 - Rejected promise: keep the inputs, show inline error *Couldn't save that fact — {message}*
@@ -404,6 +408,8 @@ English text exactly as below so future entries match).
 | `Couldn't save that fact` | teach failure (append ` — ${message}` when there is one) | no |
 | `Couldn't forget that` | forget failure | no |
 | `Retry` | error-state button (new) | no |
+| `Subject` | label of the subject select | no |
+| `Got it - JARVIS will remember that.` | inline teach confirmation (ASCII hyphen) | no |
 | `Forget this` | ✕ tooltip | no |
 | `Forget` | ✕ aria-label, and the confirm button of the forget dialog | no |
 | `Forget this fact?` | heading of the forget confirmation (DESIGN.md §8) | no |
@@ -413,7 +419,8 @@ English text exactly as below so future entries match).
 | `stated` / `observed` / `inferred` | source names inside the hedge tooltip (optional to translate) | no |
 
 Technical values (`subject` ids, person ids, `pattern_type`, numbers, timestamps) are never
-translated.
+translated. Since Phase 3 every key is translated in all 22 language files
+(`frontend/i18n-missing.json`); the last column records the state before the port.
 
 ---
 
@@ -423,12 +430,12 @@ Nothing that was on the old Memory tab is being dropped — all three cards and 
 are ported. For the record, the related features the scope brief mentions that were **not** on
 this tab:
 
-- **Document library** (`jarvis/documents`) — lived in Settings → "Document Library"; Phase 3 per
-  the fork plan. No "not yet ported" note here because the old Memory tab never showed it.
+- **Document library** (`jarvis/documents`) — lived in Settings → "Document Library"; ported in
+  Phase 3 to the Documents view. No note here because the old Memory tab never showed it.
 - **Semantic search status / enable / disable / test** (`jarvis/semantic_search`) — the
-  "Search engine" block inside that same Settings card; Phase 3 with the document library.
+  "Search engine" block inside that same Settings card; ported with the document library.
 - **Conversational memory search** (`jarvis/search_memory`) — backend exists, old panel never
-  exposed it; not added (no UI precedent to port).
+  exposed it; not added to this view (the Documents view's "Conversation memory" card added it).
 - Backend capabilities the old UI never surfaced and this view does not add: `get_knowledge`
   subject filter, forget by `(subject, key)`, teaching `kind` other than fact/preference or
   `subject` other than household/primary, `stats.by_kind/by_subject` breakdown, routine

@@ -1,138 +1,138 @@
 {
   "regenerate": "cd frontend && npm run i18n:report",
-  "keys": 1185,
-  "translated": 1185,
+  "keys": 1186,
+  "translated": 1186,
   "languages": {
     "cs": {
       "file": "custom_components/jarvis/frontend/i18n/cs.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "da": {
       "file": "custom_components/jarvis/frontend/i18n/da.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "de": {
       "file": "custom_components/jarvis/frontend/i18n/de.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "es": {
       "file": "custom_components/jarvis/frontend/i18n/es.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "fi": {
       "file": "custom_components/jarvis/frontend/i18n/fi.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "fr": {
       "file": "custom_components/jarvis/frontend/i18n/fr.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "it": {
       "file": "custom_components/jarvis/frontend/i18n/it.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "nb": {
       "file": "custom_components/jarvis/frontend/i18n/nb.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "nl": {
       "file": "custom_components/jarvis/frontend/i18n/nl.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "pl": {
       "file": "custom_components/jarvis/frontend/i18n/pl.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "pt-br": {
       "file": "custom_components/jarvis/frontend/i18n/pt-br.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "pt": {
       "file": "custom_components/jarvis/frontend/i18n/pt.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "ro": {
       "file": "custom_components/jarvis/frontend/i18n/ro.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "ru": {
       "file": "custom_components/jarvis/frontend/i18n/ru.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "sk": {
       "file": "custom_components/jarvis/frontend/i18n/sk.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "sv": {
       "file": "custom_components/jarvis/frontend/i18n/sv.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "tr": {
       "file": "custom_components/jarvis/frontend/i18n/tr.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "uk": {
       "file": "custom_components/jarvis/frontend/i18n/uk.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "zh-hant": {
       "file": "custom_components/jarvis/frontend/i18n/zh-hant.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "zh-hk": {
       "file": "custom_components/jarvis/frontend/i18n/zh-hk.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "zh-tw": {
       "file": "custom_components/jarvis/frontend/i18n/zh-tw.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     },
     "zh": {
       "file": "custom_components/jarvis/frontend/i18n/zh.json",
-      "entries": 1409,
-      "translated": 1185,
+      "entries": 1411,
+      "translated": 1186,
       "missing": 0
     }
   },

@@ -33,6 +33,7 @@ import { live } from "lit/directives/live.js";
 import { base } from "../theme/base";
 import { t } from "../i18n";
 import { haDefined, watchDefinitions } from "../ha";
+import { focusableWithin } from "../focus";
 import type { Hass, PanelData } from "../types";
 
 export type PickerKind = "entity" | "area" | "domain" | "label" | "device";
@@ -330,9 +331,10 @@ export class JvPicker extends LitElement {
     watchDefinitions(this, HA_TAGS);
   }
 
-  /** Focus the picker's input (fallback) or HA element. */
-  override focus(): void {
-    this.renderRoot.querySelector<HTMLElement>("input, ha-selector, ha-entity-picker, ha-entities-picker, ha-area-picker, ha-areas-picker")?.focus();
+  /** Focus the picker's input (fallback) or the control inside HA's element (its wrappers don't forward focus()). */
+  override focus(options?: FocusOptions): void {
+    const el = this.renderRoot.querySelector<HTMLElement>("input, ha-selector, ha-entity-picker, ha-entities-picker, ha-area-picker, ha-areas-picker");
+    if (el) (focusableWithin(el) ?? el).focus(options);
   }
 
   // ── value helpers ─────────────────────────────────────────────────────

@@ -129,7 +129,8 @@ export const base = css`
     background: var(--jv-pressed);
   }
   .jv-btn[disabled],
-  .jv-btn:disabled {
+  .jv-btn:disabled,
+  .jv-btn[aria-disabled="true"] {
     cursor: default;
     opacity: 0.5;
   }

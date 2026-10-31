@@ -50,8 +50,10 @@ let _seq = 0;
 
 /**
  * An "Other mapped slots" Remove hands keyboard focus to the next / previous
- * row's Remove. Those are disabled while the write saves, and the last row
- * takes the list with it: then the heading, else the slot grid.
+ * row's Remove. Those are disabled while the write saves, so the removal
+ * hands keepRowFocus the write's Promise and focus is placed once it has
+ * answered (the row itself again if it failed). The last row takes the list
+ * with it: then the heading, else the slot grid.
  */
 const REMOVE_FOCUS: RowFocus = { row: ".other > li", key: "data-slot", control: "[data-remove]", fallback: [".sub", "fieldset.slots"] };
 
@@ -154,23 +156,24 @@ export class JarvisEditorDoors extends JarvisEditorTab {
   }
 
   // ── actions ───────────────────────────────────────────────────────────
-  private _write(next: DoorMapping): void {
+  /** Write the whole mapping; resolves once the backend answered (true = saved). */
+  private _write(next: DoorMapping): Promise<boolean> {
     const s = this.store;
-    if (!s) return;
+    if (!s) return Promise.resolve(false);
     const clean: Record<string, string> = {};
     for (const [k, v] of Object.entries(next)) if (typeof v === "string" && v) clean[k] = v;
-    void s.writeSetting(KEY, clean);
+    return s.writeSetting(KEY, clean);
   }
 
-  private _setSlot(slot: string, eid: string): void {
+  private _setSlot(slot: string, eid: string): Promise<boolean> {
     const s = this.store;
-    if (!s) return;
+    if (!s) return Promise.resolve(false);
     const cur = s.settings.doorMapping;
-    if ((cur[slot] ?? "") === eid) return;
+    if ((cur[slot] ?? "") === eid) return Promise.resolve(true);
     const next: DoorMapping = { ...cur };
     if (eid) next[slot] = eid;
     else delete next[slot];
-    this._write(next);
+    return this._write(next);
   }
 
   /** Glow the opening marker on this floor whose sensor is `eid` (null clears). */
@@ -245,7 +248,7 @@ export class JarvisEditorDoors extends JarvisEditorTab {
                   @value-changed=${(e: CustomEvent<PickerChangeDetail>) => {
                     e.stopPropagation();
                     const v = e.detail?.value;
-                    this._setSlot(d.slot, typeof v === "string" ? v : "");
+                    void this._setSlot(d.slot, typeof v === "string" ? v : "");
                   }}
                 ></jv-picker>
               </div>
@@ -265,7 +268,7 @@ export class JarvisEditorDoors extends JarvisEditorTab {
         ? html`
             <h3 class="sub" tabindex="-1">${t("Other mapped slots")}</h3>
             <ul class="other">
-              ${others.map((slot) => {
+              ${repeat(others, (slot) => slot, (slot) => {
                 const eid = mapping[slot] ?? "";
                 const name = friendlyName(this.hass, eid);
                 return html`<li data-slot=${slot}>

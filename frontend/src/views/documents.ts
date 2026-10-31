@@ -358,10 +358,10 @@ export class JarvisViewDocuments extends JarvisView {
     this._busy = "enable";
     this._probe = null;
     try {
-      // update_config keeps runtime_config (what Settings shows) in step with
-      // config.json; the legacy "enable" action still initialises the vector
+      // one message: "enable" writes semantic_search = true through
+      // config_apply.async_apply_many (runtime_config - what Settings shows -,
+      // config.json, the config-changed signal), then initialises the vector
       // store and probes Ollama.
-      await this.ws("jarvis/update_config", { key: "semantic_search", value: true });
       const res = await this.ws<ProbeResult>("jarvis/semantic_search", { action: "enable" });
       if (res?.ok) {
         this._probe = {
@@ -392,9 +392,8 @@ export class JarvisViewDocuments extends JarvisView {
     this._busy = "disable";
     this._probe = null;
     try {
-      // update_config writes runtime_config and config.json; the legacy
-      // "disable" action only touches config.json, so Settings went stale.
-      await this.ws("jarvis/update_config", { key: "semantic_search", value: false });
+      // "disable" writes semantic_search = false the same way (vectors are kept)
+      await this.ws("jarvis/semantic_search", { action: "disable" });
       this._probe = { tone: "info", body: t("Semantic search is off — keyword search is active.") };
     } catch (err) {
       this._probe = { tone: "error", body: t("Couldn't disable semantic search — {message}", { message: this._fail(err) }) };

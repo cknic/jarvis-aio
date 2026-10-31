@@ -7,7 +7,9 @@ markup at ~L4685–4752, helpers `_build3DHouse` / `_renderHouse3d` / `_buildRes
 does not need to open the old file **except** for the one mechanical copy described in
 §Renderer (the 3D geometry module).
 
-Route: `/jarvis/residence` (tab id `residence`). Admin-only like the whole panel.
+Route: `/jarvis/residence` (tab id `residence`). Admin-only like the whole panel. Sub-route
+`/jarvis/residence/editor[/<tab>]` renders the floor-plan editor (`<jarvis-plan-editor>`, editor.md) in
+place of this view's cards (`subPath.split("/")[0] === "editor"`).
 
 ---
 
@@ -138,10 +140,11 @@ type FloorElements = Record<string, Array<{
 `_format_duration(seconds)`: `"—"` when None, `"<n>s"` under 60 s, `"<n>m"` under 1 h, else `"<n>h"`.
 
 **When fetched / refreshed**: on mount, then every **20 s** (the old panel's `_fetchInterval`
-is `20000` ms; the module docstring's "every 5s" is stale). The shared store should own this
-poll; the residence view subscribes. After the snapshot lands the view re-renders the model
-and re-fetches `jarvis/mmwave_overview` (below). Tab switches away stop nothing; the old panel
-kept one global poll.
+is `20000` ms; the module docstring's "every 5s" is stale). The panel shell owns this poll
+(every 20 s while the browser tab is visible, plus on `jarvis-refresh`); the view receives each
+snapshot as `data`. After the snapshot lands the view re-renders the model and re-fetches
+`jarvis/mmwave_overview` (below). Switching to another view stops nothing; the shell keeps one
+global poll.
 
 ### 2.2 `jarvis/mmwave_overview` — live per-room presence breakdown
 
@@ -203,8 +206,9 @@ it nudges the snapshot coordinator so the next `get_panel_data` reflects it.
 | `residence_style` | str | one of the 10 style ids (§3.2) | written when the Home Style select changes |
 
 (The old tab also wrote `door_mapping` as a JSON **string** of `{slot: entity_id}`; that editor
-is Phase 3 — see §7. Every other home key — stories, dormers, bays, chimney, basement, bedrooms,
-bathrooms, sq ft — is written from the Settings view, not here; this view only READS them.)
+now lives in the floor-plan editor's Doors tab, which writes a dict (editor.md §2.2). Every other home
+key — stories, dormers, bays, chimney, basement, bedrooms, bathrooms, sq ft — is written from the
+Settings view or the editor's House section, not here; this view only READS them.)
 
 ### 2.4 Client-side HA state used directly (no WS command)
 
@@ -460,8 +464,8 @@ stacks them — choose: ≥1280 px two columns `minmax(0,1.6fr) minmax(0,1fr)`, 
 
 ### Card A — "Residence Overview" (primary; first on mobile)
 
-1. **Header**: title `Residence Overview`; right-side chip `PRESENCE` (decorative in the old
-   panel; may show `{occupied}/{total} occupied` instead — same data as the OCCUPIED stat).
+1. **Header**: title `Residence Overview`; right-side chip `{occupied}/{total} OCCUPIED` (`ok` when
+   any area is occupied, else neutral; the old panel's decorative `PRESENCE` chip is not used).
 2. **Controls row** (wraps; stacks full-width on mobile):
    * `Home Style` — `<ha-select>`/native select of the 10 styles (§3.2), current =
      `config.residence_style`.
@@ -471,6 +475,7 @@ stacks them — choose: ≥1280 px two columns `minmax(0,1.6fr) minmax(0,1fr)`, 
      persisted).
    * **View presets**: `Front` (0°), `Right` (90°), `Rear` (180°), `Left` (270°), `Iso` (35°),
      plus hint text `drag to rotate`. Active preset highlighted; dragging clears the highlight.
+   * **Edit floor plan** button → `/jarvis/residence/editor` (A6).
 3. **Scene**: the SVG, `height: 560px` desktop / `340px` ≤ 768 px, `cursor: grab`
    (`grabbing` while dragging), `touch-action: pan-y` so vertical touch drags scroll the page
    and horizontal ones rotate (old code classified the gesture axis after 6 px of movement; with
@@ -524,7 +529,8 @@ the scene is 340 px tall; the stats strip shrinks as above; Card B follows below
 | A3 | Click a **view preset** | set theta, re-render | none | no | preset active |
 | A4 | **Drag** horizontally on the scene (mouse / touch / pointer) | `theta -= dx * 0.5` per move, rAF-throttled re-render | none | no | cursor grabbing; presets de-highlight |
 | A5 | Snapshot poll lands (every 20 s) | rebuild lit map, doors, garage, annotations, re-render; then fetch `jarvis/mmwave_overview` | `jarvis/get_panel_data` (shared), `jarvis/mmwave_overview` | — | silent |
-| A6 | Click "Edit floor plan" / "Import a plan" link (empty state + card footer) | navigate to docs | opens `https://github.com/<fork>/blob/main/docs/floor-plan-import.md` in a new tab (`rel="noopener"`); Phase 3 will route to the in-panel editor instead | no | — |
+| A6 | Click the **Edit floor plan** button (controls row) | open the in-panel editor | `navigate("residence", "editor")` → `/jarvis/residence/editor` (editor.md) | no | — |
+| A7 | Click the **Import a floor plan** link (no-floor-plan hint only) | open the docs | `https://github.com/sam3gp8/jarvis-aio/blob/main/docs/floor-plan-import.md` in a new tab (`rel="noopener noreferrer"`) | no | — |
 
 No destructive actions; nothing needs a confirmation dialog.
 
@@ -538,9 +544,9 @@ No destructive actions; nothing needs a confirmation dialog.
 | **Loading mmWave** | Card B list | single row `Reading sensors…`; chip `SCAN`. |
 | **mmWave empty** (`rooms.length === 0`) | Card B list | `No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.`; chip `NONE`. |
 | **mmWave error** (WS rejected) | Card B list | `Couldn't read sensors — restart Home Assistant after updating, then reopen.` + a `Retry` button; keep last good `rooms` for the lit map if any. |
-| **No floor plan configured** (`floor_plan_rooms` empty/invalid) | Card A | render the default plan AND show an inline hint under the controls: `No floor plan yet — the model shows a sample home. Import your plan to see your rooms.` with the docs link (A6). |
+| **No floor plan configured** (`floor_plan_rooms` empty/invalid) | Card A | render the default plan AND show an inline hint under the scene: `No floor plan yet — the model shows a sample home. Import your plan to see your rooms.` with the docs link (A7); the Edit floor plan button (A6) is always there. |
 | **No presence anywhere** (`dominant.area_id === null`) | dominant strip | name `AWAY` / `AT HOME` as sent, subtitle `no presence detected`, gauges empty (`—`). |
-| **Snapshot error** | whole view | keep the last model; banner `Couldn't reach JARVIS — retrying…` (shared store behaviour). |
+| **Snapshot error** | whole view | keep the last model; the **shell** shows its error alert ("Could not load JARVIS data" + message + Retry) above the view. The view renders no banner of its own. |
 | **Disabled controls** | Home Style select | disabled while an `update_config` is in flight; re-enabled on settle. |
 | **Narrow** | layout | per §4 mobile rules; floor pills wrap. |
 | **Reduced motion** | SVG dots, mmWave dot pulse | no `<animate>` / no CSS pulse when `prefers-reduced-motion: reduce`. |
@@ -592,8 +598,11 @@ noted). Keep the EXACT English text for keys marked present so existing translat
 | `Cape Cod`, `Colonial`, `Dutch Colonial`, `Ranch`, `Two-Story`, `Craftsman`, `Modern`, `Townhouse`, `Apartment`, `Cabin` | ✗ | style labels |
 | `AWAY`, `AT HOME`, `no presence detected`, `Occupied` | ✗ | come from the BACKEND in English (`dominant.name/subtitle`) — pass through `t()` anyway; `Occupied · 14m` will not match and stays English |
 | `No floor plan yet — the model shows a sample home. Import your plan to see your rooms.` | ✗ | new empty-state |
-| `Import a floor plan` | ✗ | new link text (de.json has `Floor Plan Editor` → Grundriss-Editor, which is the Phase 3 feature) |
-| `Couldn't reach JARVIS — retrying…` | ✗ | shared store banner |
+| `Import a floor plan` | ✗ | new link text (de.json has `Floor Plan Editor` → Grundriss-Editor, the editor's own title) |
+| `Edit floor plan` | ✗ | button in the controls row (A6) |
+
+Since Phase 3 every key is translated in all 22 language files (`frontend/i18n-missing.json`); the
+de.json column records the state before the port.
 
 Related de.json keys that exist and may be reused by the Settings/Phase 3 work (not this view):
 `Floor Plan Editor`, `No floor data`, `Bedrooms`, `Bathrooms`, `Garage bays`, `Presence`,
@@ -605,10 +614,10 @@ Related de.json keys that exist and may be reused by the Settings/Phase 3 work (
 
 | Old feature | Why dropped |
 |---|---|
-| **Floor-plan EDITOR** (Settings › Floor Plan: room drawing, resize/drag, polygon rooms, units toggle, background image + opacity, property boundary, import/export JSON, SweetHome3D import, live 3D preview `#fp-3d-preview`) | large, writes `floor_plan_rooms/_elements/_cameras/_entities/_property/_bg/_bg_opacity/_units` — Phase 3; link to `docs/floor-plan-import.md` instead. |
-| **Door mapping grid** (`DOORS · map to your entities`, slots Front Door / Garage Door N / Garage Side / Rear / Kitchen ↔ Garage / Cellar / Bulkhead / Basement, `jarvis/update_config door_mapping=<JSON string>`) | config editor, not a status view; auto-detection still works without it (backend `door_state.classify`). |
-| **Openings editor** (`+ Window / + Interior Window / + Exterior Door / + Balcony Door / + Cellar Door / + Interior Door / + Cased Opening / dormers`, per-element wall/pos/width/entity) | part of the editor; this view only RENDERS saved `floor_plan_elements`. |
-| **Camera placement** (`floor_plan_cameras`) and **entity pins** (`floor_plan_entities`, `_entMarkerStyle` live-state pins) | editor features; the 3D model never drew them. |
+| **Floor-plan EDITOR** (Settings › Floor Plan: room drawing, resize/drag, polygon rooms, units toggle, background image + opacity, property boundary, import/export JSON, SweetHome3D import, live 3D preview `#fp-3d-preview`) | large, writes `floor_plan_rooms/_elements/_cameras/_entities/_property/_bg/_bg_opacity/_units` — **ported in Phase 3** as `/jarvis/residence/editor` (editor.md), reached from this view's Edit floor plan button. |
+| **Door mapping grid** (`DOORS · map to your entities`, slots Front Door / Garage Door N / Garage Side / Rear / Kitchen ↔ Garage / Cellar / Bulkhead / Basement, `jarvis/update_config door_mapping=<JSON string>`) | config editor, not a status view; auto-detection still works without it (backend `door_state.classify`). Ported in Phase 3 as the editor's Doors tab. |
+| **Openings editor** (`+ Window / + Interior Window / + Exterior Door / + Balcony Door / + Cellar Door / + Interior Door / + Cased Opening / dormers`, per-element wall/pos/width/entity) | part of the editor (its Openings tab); this view only RENDERS saved `floor_plan_elements`. |
+| **Camera placement** (`floor_plan_cameras`) and **entity pins** (`floor_plan_entities`, `_entMarkerStyle` live-state pins) | editor features (its Cameras & pins tab); the 3D model never drew them. |
 | Leader-line callouts (`#res-callouts`) | already retired in the old code (always cleared). |
 | HUD flavour: `SATELLITE + ARCHITECTURAL DATA MERGE` subtitle, `◉`/`▲` glyphs, radar/scanline backgrounds, cyan glow text-shadows | design mandate: modern HA-themed UI. |
 | Mock data fallback (`_mockData()` with the author's rooms) when WS has not answered | new view shows loading skeletons instead. |

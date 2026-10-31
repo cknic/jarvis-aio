@@ -17,11 +17,12 @@ import { html, css, nothing, type PropertyValues } from "lit";
 import { customElement, state, query } from "lit/decorators.js";
 import { html as staticHtml, unsafeStatic } from "lit/static-html.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { repeat } from "lit/directives/repeat.js";
 import { JarvisView } from "../../view-base";
 import { base } from "../../../theme/base";
 import { t } from "../../../i18n";
 import { haDefined, watchDefinitions } from "../../../ha";
-import { keepRowFocus, type RowFocus } from "../../../focus";
+import { deepActiveElement, keepRowFocus, within, type RowFocus } from "../../../focus";
 import { confirmDialog } from "../../../components";
 import "../../../components";
 import { fixedBox, renderSVG, type Box } from "../house3d";
@@ -43,7 +44,11 @@ const PRESETS: ReadonlyArray<{ label: string; theta: number }> = [
 const PREVIEW_LS_KEY = "jarvis.editor.preview";
 const PREVIEW_DEBOUNCE_MS = 120;
 const HA_TAGS = ["ha-icon", "ha-alert", "ha-icon-button"];
-/** A toast's Undo / Dismiss takes the toast away: focus goes to the next / previous toast, else the current editor tab. */
+/**
+ * A toast's Undo / Dismiss takes the toast away: focus goes to the next / previous toast, else the current
+ * editor tab. A toast holds its auto-dismiss while focus is inside it (store.holdToast), so the toast that
+ * receives focus does not disappear under it either.
+ */
 const TOAST_FOCUS: RowFocus = { row: ".toasts > .toast", key: "data-toast", control: "[data-dismiss]", fallback: ['[role="tab"][aria-selected="true"]'] };
 
 @customElement("jarvis-plan-editor")
@@ -396,6 +401,22 @@ export class JarvisPlanEditor extends JarvisView {
   protected override updated(): void {
     const c = this._canvasQuery ?? null;
     if (c !== this._canvasEl) this._canvasEl = c;
+    this._releaseToastHolds();
+  }
+
+  /**
+   * A toast's hold normally ends on its focusout. But when a re-render removes the focused control
+   * itself (its Undo, stripped once the history moved on), focus falls to <body> and some browsers send
+   * no focusout: after every update, release each held toast that no longer contains the focus.
+   */
+  private _releaseToastHolds(): void {
+    const held = this.store.heldToasts;
+    if (!held.length) return;
+    const active = deepActiveElement();
+    for (const id of held) {
+      const el = this.renderRoot.querySelector(`.toasts > .toast[data-toast="${id}"]`);
+      if (!el || !active || !within(active, el)) this.store.holdToast(id, false);
+    }
   }
 
   private _onStore(): void {
@@ -729,8 +750,18 @@ export class JarvisPlanEditor extends JarvisView {
     if (!s.toasts.length) return html`<div class="toasts" role="status" aria-live="polite"></div>`;
     return html`
       <div class="toasts" role="status" aria-live="polite">
-        ${s.toasts.map(
-          (toast) => html`<div class="toast" data-toast=${toast.id}>
+        ${repeat(
+          s.toasts,
+          (toast) => toast.id,
+          (toast) => html`<div
+            class="toast"
+            data-toast=${toast.id}
+            @focusin=${() => s.holdToast(toast.id, true)}
+            @focusout=${(e: FocusEvent) => {
+              // moving between its own Undo and Dismiss keeps the hold
+              if (!(e.relatedTarget instanceof Node && (e.currentTarget as Element).contains(e.relatedTarget))) s.holdToast(toast.id, false);
+            }}
+          >
             <span>${toast.message}</span>
             ${toast.action
               ? html`<button type="button" class="jv-btn text" @click=${(e: Event) => keepRowFocus(e, this, TOAST_FOCUS, () => s.runToastAction(toast.id))}>${toast.action.label}</button>`

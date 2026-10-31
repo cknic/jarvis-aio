@@ -158,17 +158,24 @@ await store.writeSetting(key, v)   // the IMMEDIATE-save keys: floor_plan_units,
                                    // §2.2 for the exact value types). Optimistic overlay in `config`, status
                                    // in settingStatus[key] (saving -> saved, auto-cleared; error -> reverted),
                                    // jarvis-refresh on success. Resolves true/false. Not part of the history.
+                                   // Overlapping writes of one key: only the latest started sets the status or
+                                   // reverts, back to the last CONFIRMED value (no overlay when none was).
 await store.writeFloorBackground(floor, {image?, align?})
                                    // ONE floor of floor_plan_bg via jarvis/set_floor_background: image = a
                                    // data:image/ URL (null removes it), align = {x, y, w} (null removes it),
                                    // absent = kept. The backend merges only that floor. Same overlay / status
                                    // (settingStatus.floor_plan_bg) / refresh / true-false contract as
-                                   // writeSetting; an error restores the previous overlay. Never write
+                                   // writeSetting (overlap rule included: every confirmed floor is merged into the
+                                   // confirmed dict, in whatever order the answers arrive, and whatever the
+                                   // overlay falls back to keeps the floors still in flight). Never write
                                    // floor_plan_bg whole through writeSetting.
 store.discard(); store.adoptRemote(); store.dismissRemote(); store.clearSaveError(); store.refresh()
 store.toast(message, {label, run}?)   // message already translated; e.g. toast(t("Removed {name}", {name}), {label: t("Undo"), run: () => store.undo()})
                                       // the action is dropped as soon as the history moves on (the editor's button calls
                                       // store.runToastAction(id)), so an "Undo" never reverts a later change
+store.holdToast(id, held)             // the editor holds a toast's auto-dismiss while focus is inside it (focusin / focusout,
+                                      // and after each update it releases store.heldToasts whose toast lost focus without a
+                                      // focusout); released, it gets the time it had left (at least 1.5 s)
 ```
 
 `writeSetting()`, `writeFloorBackground()` and `save()` refuse a message over
@@ -272,7 +279,11 @@ ends it. `canvas.requestRender()` after changing overlay fields outside a
 gesture.
 
 Other canvas API: `fit()`, `zoomBy(factor, aboutClient?)`, `panBy(dx, dy)`,
-`toPlan(clientX, clientY)`, `viewBox`, `snap` / `setSnap(on)` (persisted),
+`toPlan(clientX, clientY)`, `viewBox`, `fittedViewBox` (the last `fit()`; on
+narrow its aspect ratio sizes the svg, between 260 px and `min(70vh, 520px)`,
+so pan / zoom never resize the canvas), `visibleBox` (the plan rectangle the
+svg shows, the letterbox bands around the viewBox included - the grid fills
+it), `snap` / `setSnap(on)` (persisted),
 `announce(text)` (aria-live), `focusHit(raw)` (the focusable element, not the
 touch pad under it), `focusSurface()` (focus the svg itself, e.g. after the
 focused object was removed), `context()`. Unhandled context
@@ -325,8 +336,12 @@ header of `selftest.ts`).
   for destructive things; otherwise an undoable change + `store.toast(..., {label: t("Undo"), run: () => store.undo()})`.
 * A row's Remove goes through `keepRowFocus(e, this, spec, () => remove())`
   (`src/focus.ts`, DESIGN.md §8) so keyboard focus moves to the next /
-  previous row instead of `<body>`; an object removed from the canvas leaves
-  focus on the plan (`canvas.focusSurface()`).
+  previous row instead of `<body>`; an immediate-save removal returns the
+  write's Promise (`() => this._write(...)`) so focus waits for the answer
+  (the rows' controls are disabled while `settingStatus[key]` is saving). An
+  object removed from the canvas leaves focus on the plan
+  (`canvas.focusSurface()`; from a `keepFocus` pick, return
+  `() => canvas.focusSurface()`).
 * Loading / empty / error states per DESIGN.md §6; backend errors are
   `WsError.message`.
 * Before hand-over: `npm run check`, `npm run lint:theme`, `npm run build`,

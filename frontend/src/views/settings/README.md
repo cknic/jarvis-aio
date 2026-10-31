@@ -20,19 +20,29 @@ rules in `frontend/DESIGN.md` apply unchanged (tokens only, 44 px targets,
 
 ## Wiring a plug-in module
 
-A plug-in module registers itself at top level and is imported once from
-`settings.ts`, in the block marked `plug-ins` right after the registry import:
+Every plug-in lives in `src/views/settings/tools/` - field editors and tool
+cards alike, one module per element - and registers itself at top level.
+`settings.ts` imports the folder's barrel once, in the block marked
+`plug-ins` right after the registry import, and never changes:
 
 ```ts
 // settings.ts
-import "./settings/editors/model-role";
-import "./settings/tools/energy";
+import "./settings/tools";
 ```
 
-That is the only line a Build agent adds outside its own files. Put editors
-under `src/views/settings/editors/` and tool cards under
-`src/views/settings/tools/`, one module per element, and the fixtures your
-commands need under `dev/fixtures/<type with / -> _>.json`.
+A new module is one line in the barrel, `tools/index.ts` (or, for a runtime
+tool card, in `tools/runtime.ts`, which imports the `runtime-*.ts` cards and
+registers them):
+
+```ts
+// tools/index.ts
+import "./models";          // registerFieldEditor(...) for the AI model roles
+import "./runtime";         // the runtime tool cards (runtime-energy.ts, ...)
+```
+
+That is the only line a Build agent adds outside its own files. Shared
+helpers sit next to them (`lists-controls.ts`, `runtime-base.ts`); the
+fixtures your commands need go under `dev/fixtures/<type with / -> _>.json`.
 
 ## SettingsHost
 
@@ -174,8 +184,9 @@ stores `"!"+id`), and so does the json key `biometric_entities`
 ## Tool cards
 
 ```ts
+// tools/runtime.ts
 import { registerToolCard } from "../registry";
-import "./energy-element";   // defines <jarvis-tool-energy>
+import "./runtime-energy";   // defines <jarvis-tool-energy>
 
 registerToolCard("safety", {
   id: "energy",                       // deep link /jarvis/settings/safety/tool:energy

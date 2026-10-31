@@ -185,7 +185,12 @@ toggles; roll back and show the error if the call fails.
   removal in `keepRowFocus()` (src/focus.ts): focus moves to the same control
   in the next row, else the previous row, else the list's Add control or a
   `tabindex="-1"` heading - never `<body>`. Rows carry a stable key attribute
-  (an id or entity id, never the index).
+  (an id or entity id, never the index). A removal that only takes effect
+  when the backend answers (the list re-renders from the reply, or its
+  controls are disabled while it saves) returns its Promise from the
+  callback, and focus is placed once it settles; render such a list with
+  `repeat()` keyed by the row key, so a late re-render never moves the
+  focused control to another row.
 * Destructive actions (forget, delete, dismiss-all, call off, lockdown)
   confirm with `confirmDialog({destructive: true})`.
 

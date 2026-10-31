@@ -61,14 +61,22 @@ while porting) are in `frontend/specs/<view>.md` (plus `editor.md` and
   `watchDefinitions()`), because some are lazy-loaded, and every one has a
   plain, token-styled fallback.
 
-The backend gained exactly one command for the panel, in Phase 2: the
-read-only, admin-only `jarvis/config_schema` (`websocket.py` →
+The backend gained two commands for the panel. Phase 2 added the read-only,
+admin-only `jarvis/config_schema` (`websocket.py` →
 `config_apply.build_schema`), which returns every panel-writable setting with
 its kind, default, options, bounds and current value and never includes a
-secret-looking key (`config_apply.looks_secret`). Phase 3 added none: the
-Cameras, People and Documents views, the floor-plan editor and the Settings
-tools use the `jarvis/*` commands and `jarvis.*` services the old panel
-already called. All setting writes still go through
+secret-looking key (`config_apply.looks_secret`). After Phase 3 the
+floor-plan editor gained the admin-only `jarvis/set_floor_background
+{floor, image?, align?}` → `{floor, bytes, align}` (errors `invalid_format`
+for a bad floor key, a non-`data:image/` image or a malformed alignment, and
+`update_failed`), which merges one floor of `floor_plan_bg` server-side so
+each background image travels in its own message. Otherwise the Cameras,
+People and Documents views, the editor and the Settings tools use the
+`jarvis/*` commands and `jarvis.*` services the old panel already called;
+Phase 3 only made `jarvis/biometrics`, `jarvis/semantic_search`,
+`jarvis/camera_location` and `jarvis/energy` write through
+`config_apply.async_apply_many`, so runtime_config, Settings and the native
+setting entities stay in step. Every other setting write goes through
 `jarvis/update_config {key, value}` (structured JSON values, never a
 stringified blob); `panel_register.py` did not change. Images from the
 authenticated `/api/jarvis/snapshot/{kind}/{filename}` view and HA's
@@ -110,8 +118,10 @@ both through `jarvis/intrusion`. **Response settings** writes
 numbers and booleans. The **log** (`jarvis/intrusion {action: "log"}`) shows
 each event with its still and a REAL / FALSE ALARM pair; labelling is what
 JARVIS learns benign patterns from, and the card says how many patterns are
-currently damped. Optional live refresh subscribes to the
-`jarvis_intrusion_confirmed` / `_unresolved` bus events.
+currently damped. The view subscribes to the `jarvis_intrusion_confirmed` /
+`_unresolved` bus events and re-reads status and the log when one fires; the
+status is also re-read with each snapshot, and with no live still it falls
+back to the newest still in the log.
 
 ### Cameras — `/jarvis/cameras`
 
@@ -122,18 +132,21 @@ optimistic overlay over the snapshot, and a toast region; a
 the camera concerned for 25 s.
 
 * **Camera Watch**: chips to pick a camera and a live tile fed by a frame
-  chain that falls through four tiers, each with a watchdog: HA's own
-  `ha-camera-stream` when it is loaded (the only tier that plays WebRTC-only
-  Nest cameras live; 8 s to show decoded pixels), the signed
-  `/api/camera_proxy_stream/<entity>` MJPEG stream (6 s; a black frame also
-  escalates), a signed `/api/camera_proxy/<entity>` still every 2 s (the cache
-  buster sits inside the signed path, because HA signs query parameters) and
-  finally `jarvis/camera_snapshot` every 6 s. The tier that worked is
-  remembered per camera for the session; still polling pauses while the
-  document is hidden. **DIAG** opens a diagnostics panel
-  (`jarvis/camera_diagnostics`: platform, stream and still probes per tier);
-  **Analyze now** asks first and calls the `jarvis.analyze_camera` service
-  (optionally announcing the result).
+  chain whose tiers each have a watchdog: HA's own `ha-camera-stream` when it
+  is loaded (the only tier that plays WebRTC-only Nest cameras live; 8 s to
+  show decoded pixels, looked for through its nested shadow roots), otherwise
+  the signed `/api/camera_proxy_stream/<entity>` MJPEG stream (6 s; a black
+  frame also escalates); then a signed `/api/camera_proxy/<entity>` still
+  every 2 s (the cache buster sits inside the signed path, because HA signs
+  query parameters) and finally `jarvis/camera_snapshot` every 6 s. A camera
+  that fell through to the snapshot tier goes straight there for the rest of
+  the session; still / snapshot polling pauses while the document is hidden.
+  **DIAG** opens a diagnostics panel (`jarvis/camera_diagnostics`: the
+  platforms of every camera and the per-tier probe with its verdict, plus the
+  tile's own mode, decoded size — read from HA's player through its shadow
+  roots on the `ha-camera-stream` tier — and luma); **Analyze now** asks first
+  and calls the `jarvis.analyze_camera` service (optionally announcing the
+  result).
 * **Cameras**: one row per camera with its *use* switch (the
   `disabled_cameras` list, through `jarvis/update_config`; Enable all /
   Disable all in the header), a JARVIS-only display name
@@ -155,21 +168,25 @@ through `signPath()` or data URLs, and discovered wearables stay hidden until
 the user opts in.
 
 * **Household**: the resident roster with last-seen frames, add / remove a
-  resident, and reference-photo enrolment from a file (downscaled in the
-  browser), from a past sighting, or from a camera right now
-  (`jarvis/camera_snapshot`); all through `jarvis/faces` actions
-  (`add_resident`, `remove_resident`, `set_reference`, `from_sighting`,
-  `snapshot_now`, …) and `jarvis/face_reference` for the current photo; a
-  lightbox enlarges a frame.
-* **Recently seen**: guests and unknown faces, with *Make resident* and *Name
-  this face* (`jarvis/faces` `make_resident` / `label`).
+  resident, and reference-photo enrolment from a file, from a past sighting,
+  or from a camera right now (`jarvis/camera_snapshot`); every image is
+  downscaled in the browser to ≤ 1024 px JPEG first. All through the
+  `jarvis/faces` actions `list`, `add_resident`, `remove_resident`,
+  `set_reference` and `remove_reference` (the sighting / snapshot / file paths
+  differ only in where the image comes from), plus `jarvis/face_reference` for
+  the current photo; a lightbox enlarges a frame.
+* **Recently seen**: guests and unknown faces, with *Make resident*
+  (`add_resident`) and *Name this face* (stores the frame as that name's
+  reference photo with `set_reference`).
 * **Voices**: in-process speaker identification (`jarvis/voices` `list`,
   `enroll`, `identify`, `forget`): the enrolled voiceprints, who is speaking
   now, enrolment and identification from a 4 s browser-microphone clip (needs
   HTTPS or localhost), and the three keys `voice_recognition_local`,
   `voice_recognition_delegate_stt`, `voice_embedding_model_path`.
-* **Wellbeing Context**: the opt-in wearable context (`jarvis/biometrics`
-  `status` / `enable` / `disable`) and what discovery found.
+* **Wellbeing Context**: the opt-in wearable context — the switch writes
+  `biometrics_enabled` through `jarvis/update_config`, then
+  `jarvis/biometrics {action: "status"}` returns what discovery found (shown
+  only while the context is on).
 * **Face recognition options**: the `llm_face_recognition` switch and the
   recognition source.
 
@@ -213,12 +230,14 @@ The household document library and what JARVIS can retrieve from it
 * **Search documents**: `jarvis/documents {action: "search", query}` with the
   hits, their engine and score.
 * **Search engine**: keyword (FTS) versus semantic search
-  (`jarvis/semantic_search` `status` / `enable` / `disable` / `test`); the
-  probe reports the Ollama embedding endpoint, model and vector count.
+  (`jarvis/semantic_search` `status` / `enable` / `disable` / `test`; Enable
+  writes `semantic_search`, sets up the vector store and probes Ollama,
+  Disable writes it off, both in that one command); the probe reports the
+  Ollama embedding endpoint, model and vector count.
 * **Conversation memory**: `jarvis/search_memory {query, k}` over past
   conversations.
 
-The settings the feature depends on (`document_watch_folders`,
+The other settings the feature depends on (`document_watch_folders`,
 `embed_model`, `embed_base_url`) are linked into Settings › Learning, never
 edited here; nothing on this view changes the snapshot.
 
@@ -269,8 +288,8 @@ of a section.
 
 | Section | Tool cards | Field editors |
 | --- | --- | --- |
-| General | **Briefings** (schedule summary and *Brief me now* → `jarvis.briefing`, with a speaker check), **Diagnostics** (one button per test service: `jarvis.test_tts`, `test_notify`, `observer_status`, `test_routing`, `diagnose_doorbell`, `briefing`, `analyze_camera`) | **AI Models**: one editor per role (main, classifier, reasoning, review, vision, camera reasoning) owning `<role>_provider` + `<role>_model`, with the live model list from `jarvis/list_models`, "needs setup" on unconfigured providers and a *Use {model}* fix when the stored model is no longer offered |
-| Voice & Audio | **Voice Confirmation** test (`jarvis/voice_confirm_test` at a satellite) | **Satellite → Speaker** pairings (`satellite_pairings`), **Announcement Speakers** toggles over the Cast devices, an entity picker for `voice_confirm_entities` |
+| General | **Briefings** (schedule summary and *Brief me now* → `jarvis.briefing`, with a speaker check), **Diagnostics** (one button per test service: `jarvis.test_tts`, `test_notify`, `observer_status`, `test_routing`, `diagnose_doorbell`, `briefing`, `analyze_camera` — the camera row asks first) | **AI Models**: one editor per role (main, classifier, reasoning, review, vision, camera reasoning) owning `<role>_provider` + `<role>_model`, with the live model list from `jarvis/list_models`, "needs setup" on unconfigured providers and a *Use {model}* fix when the stored model is no longer offered; the **biometric map** for `biometric_entities` (nine wellbeing kinds, one entity picker each, unknown stored kinds removable) |
+| Voice & Audio | **Voice Confirmation** test (`jarvis/voice_confirm_test` at a satellite) | **Satellite → Speaker** pairings (`satellite_pairings`), **Announcement Speakers** toggles over the Cast devices, the **voice confirmation list** for `voice_confirm_entities` (one row per entity with a Require / Exempt toggle — Exempt stores `!<entity_id>` — and an add picker) |
 | Learning | — | entity / domain / label pickers (`jv-picker`) for `excluded_entities`, `excluded_domains`, `excluded_labels`, `pattern_include_entities`, `presence_only_entities` |
 | Safety & Energy | **Energy Management** (`jarvis/energy` live draw and advice; the agency is written through `update_config`), **Hazard Monitor** (`jarvis/hazard` status and a confirmed *Scan now*), **Muted Announcements** (`jarvis/mutes`) | **Sentinel Rules** on/off rows (`disabled_sentinel_rules`), the **Appliances** row editor (`appliance_profile`) |
 | Cameras | — | area / entity pickers for `outdoor_areas`, `outdoor_entities`, `indoor_entities` |
@@ -395,7 +414,10 @@ to a 5-unit grid and to other rooms' edges (`Alt` disables). Every object is a
 focusable element: `Tab` moves through them, `Enter` selects, arrows nudge
 (`Shift` 10 units), `Delete` removes with Undo, `Esc` clears or cancels,
 `+` / `-` / `0` zoom and fit; selection changes are announced in an
-`aria-live` region.
+`aria-live` region. Removing a row from a tab's list moves focus to the next
+row's control, else the previous one's, else the list's fallback (the first
+add button, the add picker, a heading); an object removed on the canvas
+leaves focus on the plan.
 
 **Code.** `editor/model.ts` (types, parse / serialise, units, doc
 operations), `geometry.ts` (walls and gaps, ray casting, the clipped cone,
@@ -439,8 +461,15 @@ through `src/views/settings/registry.ts` and register themselves on import;
 
 Modules: `tools/models.ts` (AI Models), `tools/lists.ts` (Sentinel rules,
 announcement speakers, area and media-player pickers), `tools/pairings.ts`,
-`tools/appliances.ts`, `tools/runtime*.ts` (Briefings, Diagnostics, Voice
-Confirmation, Energy, Hazard, Mutes, Wellbeing) and `tools/governance.ts`.
+`tools/appliances.ts`, `tools/voice-confirm-list.ts`, `tools/biometrics-map.ts`,
+`tools/runtime*.ts` (Briefings, Diagnostics, Voice Confirmation, Energy,
+Hazard, Mutes, Wellbeing) and `tools/governance.ts`.
+
+A row's Remove (appliances, voice-confirm entries, orphaned pairings, unknown
+biometric kinds — and the editor's Openings, Doors, Cameras & pins lists and
+toasts) goes through `keepRowFocus()` (`src/focus.ts`): keyboard focus moves
+to the same control in the next row, else the previous row, else a fallback
+(the list's Add control or a heading), never to `<body>`.
 
 ## The harness
 
@@ -456,7 +485,8 @@ Confirmation, Energy, Hazard, Mutes, Wellbeing) and `tools/governance.ts`.
 path, anything else → `<type with / replaced by _>.json` when present, else
 `{}`; `jarvis/mode {action: "set"}` and `jarvis/set_lockdown` are echoed
 (`{ok: true, …}` with the requested mode / state) so a chip tap or the
-lockdown switch visibly takes effect. Every command the sources send has a
+lockdown switch visibly takes effect, and `jarvis/set_floor_background`
+answers `{floor, bytes, align}` built from the request. Every command the sources send has a
 fixture (the smoke test enforces it). The toolbar toggles HA light / dark (the
 real HA default theme values set on `<html>`, exactly what Home Assistant
 does), a 390 px narrow frame, the language, and a log of every WebSocket and
@@ -563,12 +593,22 @@ translation pass caught them). `npm run all` regenerates the file. See
     translating the tab bar, and a WebSocket failure surfacing as an alert;
   * every Settings section shows its tool cards and field editors, the
     `tool:<id>` deep link flashes its card, an *Elsewhere in the panel* link
-    and the Logs governance link navigate;
+    and the Logs governance link navigate; the voice-confirm list and the
+    biometric map render the fixture values and save one edit as exactly
+    their key; and every `jarvis-editor-*` / `jarvis-tool-*` element the
+    bundle defines must be asserted somewhere in the run;
   * every editor tab (`/residence/editor/<tab>`) in light and dark mounts its
     element and the canvas draws every room; then a round trip through the
     editor's store: add a room, undo, redo, save (exactly `floor_plan_rooms`
     is written, equal to the stored fixture plus the new room), and the
-    refreshed snapshot is adopted without a conflict banner;
+    refreshed snapshot is adopted without a conflict banner; a background
+    upload, alignment and removal each send exactly one
+    `jarvis/set_floor_background` for that floor (an image over the frame
+    limit is refused before sending, `floor_plan_bg` is never written whole);
+  * keyboard focus after a row's Remove (editor Openings, Doors, Cameras &
+    pins, toasts, Rooms' Remove corner; Settings appliances, voice confirm,
+    pairings, biometrics) lands on the next / previous row's control or the
+    fallback;
   * the editor model self-test (`selftest.ts`, bundled on the fly);
   * every `jarvis/…` / `config/…` command literal in `src/` has a fixture, no
     fixture is orphaned, and every call made during the run was answered by
@@ -602,11 +642,14 @@ Everything the old panel's tabs did is ported except:
   per-view fallbacks, a stale-snapshot banner inside views, `ha-slider` for
   0..1 floats, suggestion history, real YAML rendering.
 
-Not yet checked in a real Home Assistant (the harness and the smoke test only
-run the fallback branches): `ha-camera-stream` playback and its detection
-through the shadow tree, signed camera stills with the cache buster inside the
+Checked in a real Home Assistant (2026.2): `ha-camera-stream` playback and the
+decoded-size readout through its shadow tree, `ha-selector` pickers (including
+focus landing inside them), per-floor background writes, focus after Remove
+against real websocket latency, and the narrow layout at 320 and 360 px in HA's
+own frontend. Not yet checked there (the harness and the smoke test only run
+the fallback branches): signed camera stills with the cache buster inside the
 signed path, the browser-microphone voice enrolment, `ha-dialog` lightboxes,
-`ha-selector` pickers, and the narrow layout below 380 px on a real phone.
+and a physical phone.
 
 Chat is not coming back to the panel: it is Home Assistant's Assist dialog
 with the JARVIS agent.

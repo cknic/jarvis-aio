@@ -29,10 +29,13 @@ export class JvSection extends LitElement {
         display: block;
         min-width: 0;
       }
+      /* the actions wrap under the title before the title would shrink
+         below ~8em (a badge beside a short title on a 320 px phone) */
       .head {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: var(--jv-space-3);
+        gap: var(--jv-space-2) var(--jv-space-3);
         padding: var(--jv-space-4) var(--jv-space-4) 0;
         min-height: 24px;
       }
@@ -45,7 +48,7 @@ export class JvSection extends LitElement {
         flex: none;
       }
       .titles {
-        flex: 1 1 auto;
+        flex: 1 1 8em;
         min-width: 0;
       }
       h2 {
@@ -66,6 +69,7 @@ export class JvSection extends LitElement {
         display: flex;
         align-items: center;
         gap: var(--jv-space-1);
+        margin-left: auto;
         margin-right: calc(-1 * var(--jv-space-2));
         flex: none;
       }

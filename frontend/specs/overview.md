@@ -13,6 +13,11 @@ The view agent implements this view from this document alone. Everything the vie
 needs from the backend is written out below; "undocumented" means the field exists on
 the wire but nothing in the old panel consumed it.
 
+Implementation: `<jarvis-view-overview>` (`src/views/overview.ts`, extending `JarvisView`)
+with `src/views/overview/areas.ts` (`<jarvis-ov-areas>`: the Areas grid, the area
+detail dialog and the lights popover), `ov-dialog.ts` (`<jarvis-ov-dialog>`, the
+dialog fallback), `model.ts` (pure helpers) and `styles.ts`.
+
 ---
 
 ## 1. Purpose
@@ -42,10 +47,11 @@ gracefully (toast + no state change).
 
 ## 2. Data
 
-All calls go through `hass.callWS({...})` (returns the `result` object or throws an
-`Error` whose `.message` is the backend's error message; `err.code` is the backend
-error code string such as `"lockdown_failed"`). Services go through
-`hass.callService(domain, service, data, target)`.
+All calls go through `this.ws(type, payload)` (`JarvisView.ws` → `src/ws.ts`: resolves
+with the `result` object or rejects with a `WsError` whose `.message` is the backend's
+error message and `.code` the error code string such as `"lockdown_failed"`). Services
+go through `hass.callService(domain, service, data, target)` (guarded: a `hass` without
+`callService` fails the action with "Home Assistant connection not available").
 
 ### 2.1 `jarvis/get_panel_data` — the status snapshot
 
@@ -57,21 +63,24 @@ error code string such as `"lockdown_failed"`). Services go through
 
 No other fields. Admin only.
 
-**Fetch policy** (same as the old panel, which worked):
+**Fetch policy.** The panel **shell** (`src/panel.ts`) owns the snapshot: it loads it
+once, refreshes it every **20 000 ms** while the browser tab is visible, and on every
+`jarvis-refresh` event a view dispatches (debounced 250 ms); the view receives it as the
+`data` property and never calls `jarvis/get_panel_data` itself. The view adds:
 
-1. Immediately when `hass` is first set.
-2. Every **20 000 ms** while the view is connected (clear the interval on disconnect).
-3. Realtime nudge: subscribe once to `state_changed` via
+1. Realtime nudge: subscribe once to `state_changed` via
    `hass.connection.subscribeEvents(cb, "state_changed")`; when `event.data.entity_id`'s
    domain is in `{light, lock, cover, climate, sensor, binary_sensor, person,
-   device_tracker, alarm_control_panel}` schedule a refetch, throttled to at most one
-   fetch per **2 000 ms** with a trailing edge (a burst coalesces into one fetch at the
-   end of the window). Unsubscribe on disconnect.
-4. After every successful action in §4 (lockdown, mode, nap/unshush, light toggle)
-   refetch once (lights: after a 500 ms delay so HA has applied the state).
+   device_tracker, alarm_control_panel}` and the document is visible, arm one 2 000 ms
+   timer (further events while it is armed are ignored) that then calls `refresh()` —
+   a burst coalesces into one snapshot fetch at the end of the window. Unsubscribe and
+   clear the timer on disconnect.
+2. After every successful action in §4 (lockdown, mode, auto switch, nap/unshush, light
+   toggle) `refresh()` once (services and lights: after a 500 ms delay so HA has
+   applied the state).
 
-Keep the previous snapshot on a failed fetch; only the *first* fetch failing shows the
-error state (§5). Re-render from the new object; do not patch DOM by hand.
+The shell keeps the previous snapshot on a failed fetch and shows its own error alert
+with Retry (§5). Re-render from the new object; do not patch DOM by hand.
 
 **Response shape** (top-level keys, wire order). Only the keys this view uses are
 typed in full; the `config` dict carries ~150 more keys (every panel setting) which the
@@ -213,8 +222,10 @@ kept the previous data.
 voluptuous: `action` required, `vol.In(["status","set"])`; `mode` optional str;
 `reason` optional str. The `set` branch is admin-gated (`unauthorized` error otherwise).
 
-**Fetch policy**: `status` on first load, in parallel with every `get_panel_data` poll
-(it is cheap: in-memory dict), and after every `set`.
+**Fetch policy**: `status` on first `hass`, again whenever a new snapshot (`data`)
+arrives (it is cheap: in-memory dict; one call in flight at a time), and after every
+`set` (the `set` response itself carries `mode_info()`). The view sends
+`reason: "requested from panel"` with `set`.
 
 **Response — `status`** (`modes.mode_info()`):
 
@@ -361,30 +372,30 @@ There is no `jarvis.wake` service; "Unshush all" is the resume action.
 
 ## 3. Layout
 
-Use HA's own look: `ha-card` for every card, HA theme variables only
-(`--primary-text-color`, `--secondary-text-color`, `--card-background-color`,
-`--divider-color`, `--primary-color`, `--success-color`, `--warning-color`,
-`--error-color`, `--disabled-text-color`, `--ha-card-border-radius`,
-`--mdc-theme-primary`). No literal colours, no fonts, no scanlines. Icons via
-`<ha-icon icon="mdi:...">`. Status levels map to: `live` → `--success-color`,
-`warn` → `--warning-color`, `off` → `--disabled-text-color`. Lockdown engaged uses
-`--error-color`.
+Use HA's own look through the panel's design system (DESIGN.md): every card is a
+`<jv-section>` (HA's card surface), colours only through the `--jv-*` tokens of
+`src/theme/tokens.ts` (which map to HA's theme variables — `--jv-ok` ← `--success-color`,
+`--jv-warn` ← `--warning-color`, `--jv-danger` ← `--error-color`, …), state pills via
+`<jv-state-badge>`, key/value rows via `<jv-kv>`. No literal colours, no fonts, no
+scanlines. Icons via `<ha-icon icon="mdi:...">` when defined. Status levels map to:
+`live` → `ok`, `warn` → `warn`, `off` → `neutral`. Lockdown engaged uses `danger`.
 
-Grid: responsive CSS grid, `minmax(280px, 1fr)` columns, 16 px gap, 16 px page
-padding; single column when `narrow` is true. Order below is also the mobile order
-(top = primary).
+Grid: the shared `.jv-grid` (responsive columns); single column when `narrow` is true.
+Order below is also the mobile order (top = primary).
 
 ### 3.1 Header row (not a masthead — plain toolbar height)
 
-* Title "Overview" (view title; the shell may own this).
-* Right side: **Lockdown switch** (`ha-switch` or toggle button) with label "Lockdown"
-  and state text "Engaged" / "Off"; red tint when engaged. Tooltip:
+* No view title (the shell's tab bar names the view).
+* A full-width **lockdown bar**: icon, `Lockdown: Engaged` / `Lockdown: Off`, secondary
+  text, and the **Lockdown switch** (`ha-switch`, or a native `role="switch"` checkbox)
+  with `aria-label` "Lockdown"; danger tint when engaged; `aria-live="polite"`. Tooltip:
   "Lockdown engaged — tap to lift" / "Tap to engage lockdown". When `lockdown.auto`
   is true add secondary text "engaged automatically (alarm armed)" and when
   `lockdown.reason` is non-empty show it as secondary text. Show "since <relative
   time>" from `lockdown.since` when active.
 
-On mobile the lockdown switch wraps under the title but stays first.
+The switch is disabled until the first snapshot has arrived. On mobile the bar stays
+first.
 
 ### 3.2 Card "Status" (primary)
 
@@ -515,11 +526,10 @@ click handler at all; mode chip clicks on the already-active mode are no-ops.
 
 | state | when | what the user sees |
 |---|---|---|
-| **Loading (first)** | no snapshot yet | skeleton `ha-card`s for Status, Mode, Right now, Areas (grey blocks; no mock data — the old `_mockData` is gone) and the header lockdown switch disabled |
+| **Loading (first)** | no snapshot yet | skeleton `<jv-section loading>` cards for System Status, Operational Mode, Right now, Areas (grey blocks; no mock data — the old `_mockData` is gone) and the header lockdown switch disabled |
 | **Loaded** | snapshot present | §3 |
 | **Refreshing** | later polls | no spinner; render in place when the new object arrives (Lit re-render; no DOM patching) |
-| **Error (first load)** | first `get_panel_data` throws | single `ha-card` with `ha-alert alert-type="error"`: "Couldn't load JARVIS status — <msg>" and a "Retry" button that refetches; polling keeps running |
-| **Error (later)** | a poll throws while data exists | keep the last snapshot; show a thin `ha-alert alert-type="warning"` above the grid: "Connection to JARVIS lost — retrying…"; remove it on the next success |
+| **Error (snapshot)** | a `get_panel_data` fetch throws | owned by the **shell**, for every view: an `ha-alert alert-type="error"` titled "Could not load JARVIS data" (styled fallback without HA elements) with the error message and a "Retry" button; the last snapshot (if any) stays rendered and polling keeps running; the alert clears on the next success. The view itself renders no error card (the strings "Couldn't load JARVIS status —" / "Connection to JARVIS lost — retrying…" are not used) |
 | **Mode unavailable** | `jarvis/mode status` throws (e.g. HA not restarted after update) | Mode card body: "Couldn't load modes — restart Home Assistant after updating."; chips hidden |
 | **Empty areas** | `areas.length === 0` | Areas card body: "No areas with JARVIS-relevant devices yet. Assign satellites, speakers, presence sensors or lights to Home Assistant areas." |
 | **Nobody home** | `dominant.area_id === null` | Right-now card shows "Nobody home" / "Someone is home" + "No presence detected"; stats show "—" |
@@ -528,8 +538,9 @@ click handler at all; mode chip clicks on the already-active mode are no-ops.
 | **Action in flight** | §4 | the triggering control is disabled; nothing else blocks |
 | **Not admin** | any `unauthorized` error | toast "Administrator privileges are required for this action" and the control reverts (should not happen: the panel is admin-only) |
 
-Lit housekeeping: clear the 20 s interval, the throttle timer and both subscriptions
-in `disconnectedCallback`; re-arm in `connectedCallback` if `hass` is already set.
+Lit housekeeping: clear the nudge timer and the `state_changed` subscription in
+`disconnectedCallback`; re-subscribe in `connectedCallback` / when `hass` arrives. (The
+20 s interval belongs to the shell.)
 
 ---
 
@@ -540,6 +551,10 @@ string (the existing i18n mechanism: `/jarvis_panel_static/i18n/<lang>.json`, ke
 English, fallback = the key). Checked against `de.json`, `fr.json`, `es.json`
 (337 keys each, identical key sets). "✓" = already translated in those files (reuse the
 key byte-for-byte); "new" = falls back to English until Phase 3 adds translations.
+Phase 3 did: every panel key is now translated in all 22 language files
+(`frontend/i18n-missing.json`), and `npm run i18n:keys` lists the keys the code
+actually uses (e.g. `Nap 30 min` / `Nap 60 min`, `Notify target`, `Est. cost`,
+`since {time}`, `{name} details`, `No areas yet`, `Bedroom`).
 
 Dynamic values (`<n>`, names, temps, times) are interpolated **outside** `t()`; never
 build a key with a number in it.
@@ -642,12 +657,12 @@ received (capitalise mode names), never translate.
 | Masthead (brand, version badge, `[ STATUS: NOMINAL ]`, clock, greeting + honorific, global search) | HUD chrome; the shell owns navigation and HA already shows time. Version moves to the Status footer. |
 | Reactor ring / radial gauges / radar sweep / scanlines / Google Fonts | explicitly out of scope — HA theme instead |
 | Demo room rotation + `_mockData` fallback | fake data before the first fetch is misleading; skeletons instead |
-| Camera Watch (stream/still/WS-snapshot fallback chain, DIAG, `jarvis_camera_event` focus) | large, camera-specific; belongs in its own cameras view with `auth/sign_path` handling |
-| Activity Feed (`jarvis/get_activity_log hours:2 limit:30`, search box) | belongs in the activity/logs view |
-| Cognitive Core readout (`jarvis/get_cognitive_status`: learning.days_of_data/state_changes/commands/suggestions, ignore_rules, last_analysis.ts/patterns_found/new_suggestions) | diagnostics, not at-a-glance status; move to a learning/diagnostics view |
-| "Analyze Now" (`jarvis/run_analysis` → `{ran, reason?, patterns_found?, new_suggestions?, near_misses?, diagnostic?, backfill?}`) | same as above |
-| "Briefing" (`jarvis.briefing`) and "Status Dump" (`jarvis.observer_status`) quick actions | not in the overview brief (status/mode/lockdown/nap); briefing fits a briefings view |
-| Goals card (`jarvis/goal_action create/cancel/delete`, `goals[]`) | own feature; not status |
+| Camera Watch (stream/still/WS-snapshot fallback chain, DIAG, `jarvis_camera_event` focus) | large, camera-specific; now the Cameras view (cameras.md) |
+| Activity Feed (`jarvis/get_activity_log hours:2 limit:30`, search box) | now the Logs view's Activity Feed (logs.md) |
+| Cognitive Core readout (`jarvis/get_cognitive_status`: learning.days_of_data/state_changes/commands/suggestions, ignore_rules, last_analysis.ts/patterns_found/new_suggestions) | diagnostics, not at-a-glance status; now on the Logs view (Cognitive Core card) and the Suggestions view's learning card |
+| "Analyze Now" (`jarvis/run_analysis` → `{ran, reason?, patterns_found?, new_suggestions?, near_misses?, diagnostic?, backfill?}`) | now on the Suggestions view (suggestions.md) |
+| "Briefing" (`jarvis.briefing`) and "Status Dump" (`jarvis.observer_status`) quick actions | not in the overview brief (status/mode/lockdown/nap); now the Settings › General "Briefings" and "Diagnostics" tool cards (settings-tools.md §4.16, §4.18) |
+| Goals card (`jarvis/goal_action create/cancel/delete`, `goals[]`) | own feature; now on the Suggestions view |
 | Onboarding welcome card (`config.onboarding {show, steps[], done_count, total}`, writes `onboarding_dismissed`) | first-run guidance with jumps into Settings cards that don't exist yet in the new panel |
 | Area temp/humidity sparklines (`jarvis/get_area_sparklines` → `{sparklines: {area_id: {temp?: number[], humidity?: number[]}}}`, polled every 300 s) | extra recorder query; nice-to-have trend, not status |
 | Lockdown tile text `ARMED`/`OFF`, status badge `LOCKDOWN`/`NOMINAL` | replaced by the switch + "Engaged"/"Off" |

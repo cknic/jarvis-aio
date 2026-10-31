@@ -22,12 +22,18 @@ confirmation test, the Diagnostics service buttons, Governance enforcement switc
 doorbell training, camera diagnostics), document library + semantic search, faces / voices,
 Wellbeing-Context enable/disable, Observer / Memory read-only stats, onboarding.
 
-Files the builder owns: `frontend/src/views/settings.ts`, `frontend/src/views/settings/**`
-(`field.ts`, `presentation.ts`, `coerce.ts` already exist; new files go under
-`frontend/src/views/settings/editors/` and `frontend/src/views/settings/tools/`), and the fixtures
+Files: `frontend/src/views/settings.ts`, `frontend/src/views/settings/**` — `field.ts`,
+`presentation.ts`, `coerce.ts`, `registry.ts` (the plug-in registry + `SettingsHost`, §3), `README.md`
+(the plug-in contract), and **every editor and tool card under `frontend/src/views/settings/tools/`**
+(one barrel `tools/index.ts`, imported once from `settings.ts`): `models.ts`, `lists.ts` (+
+`lists-controls.ts`), `pairings.ts`, `appliances.ts`, `voice-confirm-list.ts`, `biometrics-map.ts`,
+`runtime.ts` (registers the runtime cards) with `runtime-base.ts`, `runtime-briefing.ts`,
+`runtime-diagnostics.ts`, `runtime-voice-confirm.ts`, `runtime-energy.ts`, `runtime-hazard.ts`,
+`runtime-mutes.ts`, `runtime-wellbeing.ts`, and `governance.ts`. The shared picker is
+`src/components/jv-picker.ts`; the focus helper for row removals is `src/focus.ts`. Fixtures:
 `frontend/dev/fixtures/jarvis_list_models.json`, `jarvis_energy.json`, `jarvis_hazard.json`,
-`jarvis_mutes.json`, `jarvis_voice_confirm_test.json` (plus the two small additions to `panel_data.json`
-in §9 R12). Nothing in `src/components/`, `src/panel.ts`, `src/theme/`, `src/views/logs*`.
+`jarvis_mutes.json`, `jarvis_voice_confirm_test.json`, `config_area_registry_list.json`,
+`config_label_registry_list.json`, `config_device_registry_list.json` (§9 R12).
 
 ---
 
@@ -38,16 +44,16 @@ keys whose value is a *selection from live data* (entities, areas, labels, domai
 lists, Cast speakers, satellites, Sentinel rules) or a *structured record* (appliance profile, satellite
 pairings, biometric map), and the handful of *runtime tools* that lived on the old Settings tab beside
 those keys (live model lists, energy picture, hazard scan, mute list, brief-me-now, voice-confirm test,
-service test buttons, governance kill-switches). After this spec every "Not yet ported" line in
-`presentation.ts` `NOT_PORTED` except the ones listed in §7 is removed.
+service test buttons, governance kill-switches). With these in place `presentation.ts` `NOT_PORTED` is gone;
+what moved to another view is listed per category in `ELSEWHERE` ("Elsewhere in the panel", §3.3).
 
 Two extension points are added to the existing view, both keyed by data so the view itself still knows
 no setting by hand:
 
 * a **field editor** — a custom element that replaces the kind-based control inside the existing
   `<jarvis-config-field>` row for one key (and may *consume* sibling keys it edits together with it);
-* a **tool card** — a self-contained custom element rendered as its own `<jv-section>` after the field
-  list of one category.
+* a **tool card** — a self-contained custom element rendered as its own `<jv-section>` at the top of one
+  category, above its field list.
 
 Both receive `hass`, `data` (snapshot), `narrow`, and a `host` object through which all config writes go,
 so the per-row saving / saved / failed feedback, the confirm-before-enable rule, the appliance reload hook
@@ -158,7 +164,8 @@ stale id).
 
 ### 2.5 `jarvis/get_enforcement` / `jarvis/set_enforcement` — governance switches
 
-Identical to `logs.md` §6–7 (the Logs view's `jv-logs-governance` uses them today).
+Identical to `logs.md` §6–7. The Settings › Governance tool card (§4.12) is the **only** writer; the Logs
+view's `jv-logs-governance` reads `get_enforcement` for a read-only summary and links here.
 
 ```python
 { vol.Required("type"): "jarvis/get_enforcement" }                                   # no other keys
@@ -210,10 +217,11 @@ Response (`energy.power_status`, "never raises"):
 }
 ```
 
-Errors: `bad_agency` (`"unknown agency '<x>'"`), `energy_failed`. The panel calls **`status` only**;
-`set_agency` writes `jarvis_config` without touching `runtime_config`, so the catalogue value and the
-generic `energy_agency` row would go stale (§9 R3) — the agency chips save through `host.save("energy_agency", …)`
-and then re-read `status`.
+Errors: `bad_agency` (`"unknown agency '<x>'"`), `energy_failed`; `set_agency` is admin-gated
+(`unauthorized`). The panel calls **`status` only**: the agency chips save through
+`host.save("energy_agency", …)` (the catalogue row's single pipeline) and then re-read `status`. (`set_agency`
+now also writes through `config_apply.async_apply_many`, so it no longer desynchronises the catalogue —
+§9 R3 — but the panel keeps one write path.)
 
 ### 2.7 `jarvis/hazard` — hazard monitor status and on-demand scan
 
@@ -307,25 +315,27 @@ editor may read it from `host`'s last reload result if exposed, otherwise from `
 
 ### 3.1 `SettingsHost` — what the view hands to every editor and tool card
 
-New file `src/views/settings/host.ts`:
+Declared in `src/views/settings/registry.ts` (the view implements it with its own `_change` / `_save` /
+`_scheduleRefetch` / `refresh()` / `_toast`):
 
 ```ts
-export interface SaveResult { ok: boolean; error?: WsError }
+export interface SaveResult { ok: boolean; error?: WsError }   // no error = the user cancelled a confirm dialog
 
 export interface SettingsHost {
-  /** The current effective value (schema.values[key] ?? field.default); undefined when the key is not in the catalogue. */
+  /** Effective value (schema.values[key] ?? field.default); undefined when the key is not in the catalogue. */
   value(key: string): unknown;
   field(key: string): ConfigField | undefined;
   /**
-   * Write one key through the view's pipeline: confirm-before-enable, ui_language ordering,
-   * appliance reload, per-row status, queueing of a second write to the same key, debounced
-   * schema re-fetch and shell refresh. Resolves {ok:false, error} instead of throwing;
-   * resolves {ok:false} without error when the user cancelled a confirm dialog.
+   * Write one key through the view's pipeline (coerced to the key's kind): confirm-before-enable,
+   * ui_language ordering, appliance reload, per-row status, queueing of a second write to the same key
+   * (only the latest value is sent; both callers get the final result), debounced schema re-fetch and
+   * shell refresh. Resolves {ok:false, error} instead of throwing; {ok:false} without error when the user
+   * cancelled a confirm dialog.
    */
   save(key: string, value: unknown): Promise<SaveResult>;
   /** Save several keys in order (stops at the first failure). */
   saveMany(entries: Array<[string, unknown]>): Promise<SaveResult>;
-  /** Ask the view to re-fetch jarvis/config_schema now (silent). */
+  /** Re-fetch jarvis/config_schema soon (debounced, silent). */
   refetch(): void;
   /** Ask the shell to refresh the snapshot now (JarvisView.refresh()). */
   refreshSnapshot(): void;
@@ -334,141 +344,120 @@ export interface SettingsHost {
 }
 ```
 
-`settings.ts` implements it with its existing `_change` / `_save` / `_scheduleRefetch` / `refresh()` /
-`_toast`. The only behavioural change to `_save`: it returns `SaveResult` (today it returns `void` and
-only sets the row status). `_change` returns `{ok:false}` when a confirm dialog is declined. The
-`field-change` / `field-reset` events the generic row emits keep working unchanged (they call the same
-methods).
+The `field-change` / `field-reset` events the generic row emits keep working unchanged (they call the
+same methods). Editors and tool cards never call `ws("jarvis/update_config")` themselves.
 
 ### 3.2 Field editors
 
-New registry `src/views/settings/editors/index.ts`:
+A **registry**, not a static map: a plug-in module calls `registerFieldEditor()` at module scope
+(`src/views/settings/registry.ts`) and is imported once through `tools/index.ts`:
 
 ```ts
-export interface FieldEditorSpec {
-  tag: string;                 // custom element tag, registered by importing its module here
-  consumes?: string[];         // sibling keys this editor edits too; their generic rows are not rendered
-  options?: Record<string, unknown>;   // static per-key options passed as .options (domain filters, …)
-}
-export const FIELD_EDITORS: Record<string, FieldEditorSpec> = { … (table below) … };
-export const CONSUMED_BY: Record<string, string> = /* derived: consumed key -> owner key */;
+registerFieldEditor(
+  match: string | ((field: ConfigField) => boolean),   // exact key, or a predicate
+  factory: (field, value, onChange, ctx) => TemplateResult | typeof nothing,
+  opts?: { consumes?: string[]; noReset?: boolean },
+): () => void                                          // unregister
 ```
 
-The element contract (`src/views/settings/editors/base.ts` exports an optional `JarvisFieldEditor`
-base class with these properties; extending it is optional, the properties are not):
+* `field` — the owner key's catalogue entry; `value` — already the kind's JS type (`list → string[]`,
+  `json → parsed value`, `bool → boolean`, `int/float → number | null`, `str/enum → string`; the row applies
+  `coerce.normalise()`). While a save is in flight the row passes the value last emitted (optimistic); it
+  reverts to the stored value when the save fails.
+* `onChange(next)` — save the **owner** key (same JS type); the row coerces it, emits `field-change` and the
+  view's pipeline does the rest, the status appearing in the row's status slot. An editor must not dispatch
+  `field-change` itself nor also call `ctx.host.save(field.key, …)` (double save).
+* `ctx` — `{hass, data, narrow, disabled, label, id, placeholder, host}`: `disabled` while `hass` is
+  missing; `id` goes on the primary control (the row's `<label for>` points at it); `label` for
+  `aria-label`; `host` (the `SettingsHost`) for any other key. Editors read `hass` / `data` from `ctx` on
+  every render and never cache `hass`; anything with state renders its own custom element from the
+  factory.
+* `consumes` — sibling keys the editor edits too: their generic rows are not rendered (`consumedKeys()`),
+  a search hit on a consumed key shows the owner's row once, the deep link `/settings/<cat>/<consumedKey>`
+  scrolls to and flashes the owner, and the owner row shows the help text of every consumed key (joined
+  by a line break) and the save status of the owner **and** each consumed key (most severe level wins,
+  messages joined with " · "). Consumed keys are saved with `ctx.host.save(consumedKey, value)`.
+* `noReset: true` hides the row's "Default: … / Reset to default" (the AI Models editor).
+* Resolution (`findFieldEditor`): an exact-key registration beats a predicate; among several of the same
+  kind the **last registered wins**.
 
-```ts
-hass?: Hass;  data: PanelData | null;  narrow: boolean;  disabled: boolean;
-field: ConfigField;            // the owner key's catalogue entry
-value: unknown;                // the owner key's current value (already the catalogue kind's JS type)
-host: SettingsHost;            // all writes
-options: Record<string, unknown>;   // FIELD_EDITORS[key].options ?? {}
-label: string;                 // the row's display label (for aria)
-```
+Row integration (`field.ts`): `<jarvis-config-field>` consults the registry in `render()` before its kind
+switch; when an editor matches, the control is `<div class="control wide">${factory(…)}</div>` and the
+`bool` switch-in-the-header layout is off. Label, `key` code, "HA entity" badge, help / hint, default +
+reset and the status slot stay with the row.
 
-Rules:
-
-* The editor writes with `this.host.save(key, value)` (or `saveMany`). It must **not** dispatch
-  `field-change` (that would double-save) and must not call `jarvis/update_config` itself.
-* It may render its own transient note (e.g. "Loading models…"), but the per-key saving / saved /
-  failed status is shown by the row's existing status slot — the editor does not duplicate it. For a
-  **consumed** key the row shows the status of the *owner* key **and** of each consumed key, joined with
-  " · " (so a model save and a provider save both surface). `settings.ts` already keeps `_status` per key;
-  the row gets a new `.statuses: FieldStatus[]` property for that (owner first).
-* It reads live data from `hass` and `data` on every render (never caches `hass`) and uses
-  `watchDefinitions(this, [...])` for the HA elements it feature-detects (§3.4).
-* Keyboard, labels, 44 px targets, tokens-only colour: DESIGN.md applies unchanged.
-
-Row integration (`field.ts`), the smallest change that works: `<jarvis-config-field>` gets
-`@property editorTag?: string`, `@property editorOptions`, `@property hass`, `@property data`,
-`@property host`, `@property statuses`. In `render()`, when `editorTag` is set, the control is
-``staticHtml`<${unsafeStatic(editorTag)} .hass .data .narrow .disabled .field .value .host .options .label></${…}>` ``
-inside `<div class="control wide">`, replacing the kind switch; label, key, "HA entity" badge, help,
-hint, "Default: … / Reset to default" and the status slot render exactly as today. "Reset to default"
-still emits `field-reset` for the owner key only (consumed keys keep their values; the owner's editor
-re-renders from the new value). The reset button is hidden when the editor's spec sets
-`options.noReset === true` (used by the AI Models editor, see §4.1).
-
-View integration (`settings.ts`):
-
-* `_fieldsIn(category)` drops keys present in `CONSUMED_BY` from the rendered list. Search still matches
-  a consumed key's key / label / help, but the **owner** row is shown (de-duplicated) and the match count
-  counts the owner once.
-* Deep link `/settings/<cat>/<consumedKey>` scrolls to and flashes the owner row.
-* `_renderFields` passes `.editorTag=${FIELD_EDITORS[f.key]?.tag}`, the options, `hass`, `data`,
-  `host`, and `.statuses=${[owner, ...consumed].map(k => this._status.get(k)).filter(Boolean)}`.
-* `hasSuggestionSource` / `suggestionsFor` keep working for keys **without** an editor (the datalist and
-  chips of settings.md §3.4 remain the fallback for any list / str key not in `FIELD_EDITORS`).
+One editor is **built in** (`registry.ts`): every `kind: "list"` key named `*_entities`, `*_domains`,
+`*_labels` or `*_areas` renders a multi-select `<jv-picker>` of the matching kind (entity / domain / label /
+area; domains and labels accept custom values; `pattern_include_entities` is limited to `binary_sensor`,
+`device_tracker`, `person`, `sensor`). Spec editors that need more register the exact key and win
+(`voice_confirm_entities`, `lab_areas`, …).
 
 ### 3.3 Tool cards
 
-New registry `src/views/settings/tools/index.ts`:
+Also a registry (`registry.ts`):
 
 ```ts
-export interface ToolCardSpec {
-  id: string;         // deep-link id: /jarvis/settings/<category>/tool:<id>
-  tag: string;        // custom element
-  name: string;       // English card heading (t() key), also matched by search
-  keywords?: string[];// extra English words matched by search (not translated)
-}
-export const TOOL_CARDS: Record<string, ToolCardSpec[]> = {
-  core:       [BRIEFING, DIAGNOSTICS],
-  voice:      [VOICE_CONFIRM_TEST],
-  safety:     [ENERGY, HAZARD, MUTES],
-  governance: [GOVERNANCE],
-};
+registerToolCard(category: string, card: {
+  id: string;          // deep-link id: /jarvis/settings/<category>/tool:<id> (also data-tool-id)
+  title: string;       // English heading (t() key), matched by the search box
+  element: string;     // custom element tag
+  icon?: string;       // informational
+  keywords?: string[]; // extra English words matched by search (not translated)
+}): () => void          // registering the same id again replaces the card
 ```
 
-Element contract: properties `hass`, `data`, `narrow`, `host`, `active` (true while its category is the
-visible one — tools fetch on first `active`, not on view connect, so opening General does not scan
-hazards). Each tool renders **its own `<jv-section heading icon subheading>`** (so it can put a badge or
-a button in `slot="actions"`) and owns its loading / empty / error states (DESIGN.md §6). It writes config
-only through `host.save`; it calls its own runtime commands with `ws(this.hass, …)` from `src/ws.ts`.
+Registered today (in registration order per category): `core` — `briefing`, `diagnostics`; `voice` —
+`voice-confirm-test`; `safety` — `energy`, `hazard`, `mutes`; `home` — `wellbeing` (§4.19); `governance` —
+`governance`. `learning` and `cameras` have none. The smoke test asserts exactly this set per category.
 
-View integration: after the category's field `<jv-section>` and before (what remains of) "Not yet
-ported", `settings.ts` renders `TOOL_CARDS[cat].map(spec => <${spec.tag} data-tool-id=${spec.id} .hass
-.data .narrow .host .active=${true}>)`. In search mode a tool card is rendered under its category when
-`spec.name` or a keyword matches the query (its fields are not searched). Deep link
-`/settings/<cat>/tool:<id>` scrolls to `[data-tool-id="<id>"]` and flashes it the same way as a field
-(the host adds the `flash` attribute; each tool styles `:host([flash])` with `--jv-accent-soft`). On
-narrow, tool cards stack after the fields in the same order; no card is collapsed by default except
-Governance's explanation paragraphs (see §4.12).
+Element contract (`ToolCardElement`): properties `hass`, `data`, `narrow`, `host`, `active` (true while its
+category is the visible one — tools fetch on first `active`, not on view connect, so opening General does
+not scan hazards). Most cards extend `JarvisToolCard` (`tools/runtime-base.ts`: `ws()`, `value()`,
+`navigate()`, `toast()`, `offline`, `renderError()` with Retry, `renderLink()`, `renderIconButton()`). Each
+tool renders **its own `<jv-section heading icon subheading>`** (so it can put a badge or a button in
+`slot="actions"`) and owns its loading / empty / error states (DESIGN.md §6). It writes config only through
+`host.save`; it calls its own runtime commands with `ws(this.hass, …)`.
 
-Order on the page for one category: fields → tool cards (in `TOOL_CARDS` order) → "Not yet ported"
-(only if any §7 line remains for that category).
+View integration (`settings.ts`): for the active category the page is **tool cards first** (in registration
+order, `<tag data-tool-id .hass .data .narrow .host .active ?flash>`), then the category's field
+`<jv-section>`, then — where `presentation.ts` `ELSEWHERE` lists any — an **"Elsewhere in the panel"**
+card linking the old Settings cards that moved to a view (General: Operational Mode → Overview, System
+Diagnostics → Logs, Wellbeing Context → People; Learning: Document Library → Documents, Observer Tuning →
+Logs; Cameras: Cameras / Doorbell Training → Cameras, Face recognition → People; Home: Floor Plan Editor →
+`/jarvis/residence/editor`). In search mode a card shows under its category when its (translated) title,
+id or a keyword matches (its contents are not searched); the category's count is fields + matching cards.
+Deep link `/settings/<cat>/tool:<id>` scrolls to `[data-tool-id="<id>"]` and toggles its `flash` attribute
+for ~1.6 s (each tool styles `:host([flash])` with `--jv-accent-soft`).
 
-### 3.4 HA picker elements: what exists, how to use it, and the fallback
+### 3.4 HA picker elements and `<jv-picker>`
 
-HA's frontend registers these in the main window (the panel is not an iframe) but **lazily**; none is
-guaranteed to be defined when the panel renders, and none can be imported by the panel. Always
-`haDefined(tag)` at render time and `watchDefinitions(this, [tags])` in `connectedCallback()`.
+HA's frontend registers its pickers in the main window (the panel is not an iframe) but **lazily**; none is
+guaranteed to be defined when the panel renders, and none can be imported by the panel. Every picker in
+this spec is the shared `<jv-picker>` (`src/components/jv-picker.ts`), which does the detection itself:
 
-| element | properties (set as `.prop`) | event | notes |
-|---|---|---|---|
-| `ha-selector` | `.hass`, `.selector` (an HA selector dict, e.g. `{entity: {multiple: true, domain: ["media_player"]}}`, `{entity: {filter: {domain: "camera"}}}`, `{area: {multiple: true}}`, `{select: {options: [{value,label}], multiple?, custom_value?: true, mode: "dropdown"}}`), `.value`, `.label`, `.helper`, `.disabled`, `.required` | `value-changed` with `e.detail.value` (string, string[], or undefined when cleared) | **Preferred**: one tag covers entity, entities, area, areas and select, and it lazy-loads its own `ha-selector-*` children. Defined once any HA form (`ha-form`) has been shown in the session (device / entity dialogs, automation editor, most config pages). Stop the event's propagation (`@value-changed=${e => { e.stopPropagation(); … }}`) so nothing above misreads it. |
-| `ha-entity-picker` | `.hass`, `.value`, `.label`, `.includeDomains: string[]`, `.excludeDomains`, `.entityFilter: (state) => boolean`, `.allowCustomEntity`, `.disabled`, `hideClearIcon` | `value-changed` (`detail.value: string \| undefined`) | What `ha-selector-entity` renders internally; use directly only when `ha-selector` is undefined but this is (rare: it means some picker-using dialog loaded without ha-form). |
-| `ha-entities-picker` | as above with `.value: string[]`, `.includeDomains`, `.entityFilter`, `.pickEntityLabel` | `value-changed` (`detail.value: string[]`) | multi-entity list with an "add" row |
-| `ha-area-picker` / `ha-areas-picker` | `.hass`, `.value` (string / string[]), `.label`, `.noAdd`, `.excludeAreas`, `.disabled` | `value-changed` | `ha-areas-picker` renders one `ha-area-picker` per value plus an empty one |
-| `ha-combo-box` | `.items: {value,label}[]`, `.value`, `.label`, `.allowCustomValue`, `.itemValuePath="value"`, `.itemLabelPath="label"`, `.filteredItems` | `value-changed` | generic typeahead; the model picker uses it when defined |
+```html
+<jv-picker kind="entity|area|domain|label|device" multiple allow-custom
+           .hass .data .value=${ids} .label .domains=${["media_player"]} .items=${[{value, label}]}
+           .placeholder ?disabled @value-changed=${(e) => { e.stopPropagation(); use(e.detail.value); }}>
+```
 
-Detection order for the pickers in this spec: `ha-selector` → (`ha-entity-picker` /
-`ha-entities-picker` / `ha-area-picker` / `ha-areas-picker` / `ha-combo-box` directly) → **fallback**.
-The harness (`npm run dev`, `npm run smoke`) never defines any of them, so the fallback is what CI
-exercises and must be complete on its own:
+* `value-changed` → `detail.value` is `string[]` (multiple) or `string | undefined` (single; `undefined` =
+  cleared) — the shape HA's pickers emit, in both branches.
+* HA branch when defined: `ha-selector` (entity / area / label / device / select-with-custom-values),
+  else `ha-entity-picker` / `ha-entities-picker` / `ha-area-picker` / `ha-areas-picker`. The branch is
+  re-evaluated only while the picker is not focused, so a lazily arriving HA element never steals the caret.
+* Fallback (what the harness and the smoke test exercise): chips for the selected values (label, id in code
+  font, "exempt" / "not found" tags, a 44 px × button labelled `Remove {name}`) plus a `role="combobox"`
+  input with a `role="listbox"` list (type to filter, ↑/↓, Enter picks or adds a custom value, Escape
+  closes, Backspace on an empty input removes the last chip; 50 rows shown, "{count} more — type to
+  filter"); an "Add" button for typed custom values.
+* Sources: entities and domains from `hass.states`; areas from `hass.areas`, then `data.areas`, then
+  `config/area_registry/list`; labels from `data.config.available_labels`, then `config/label_registry/list`;
+  devices from `hass.devices`, then `config/device_registry/list` (fetched on first focus, shared for 60 s).
+  `.items` replaces the source for any kind (models, Cast devices, satellites, rules).
 
-**Fallback picker** (`src/views/settings/editors/picker.ts`, one element `<jv-picker>` used by every
-editor below): a native `<input type="search" list autocomplete="off">` + `<datalist>` built lazily on
-focus from the item source, capped at 500 entries filtered by the typed text (settings.md risk 11), an
-"Add" button (`.jv-btn`), and — for multi-value keys — the chosen values as a `<ul>` of removable chips
-(`<li>` with the label, the id in `.jv-mono` when it differs, and a 44 px-hit `×` button labelled
-`t("Remove {name}")`). Props: `.items: {value,label}[] | () => {value,label}[]`, `.value: string |
-string[]`, `.multiple`, `.allowCustom` (accept a typed value not in items; otherwise "{value} is not a
-known {thing}" note), `.placeholder`, `.disabled`, `.label`; event `value-changed` with the same
-`detail.value` shape as HA's pickers. The HA branch and the fallback branch emit identically, so each
-editor has one handler.
-
-A single-value key renders the same element with `multiple=false` and a `— none —` / clear affordance
-(the HA pickers have a clear icon; the fallback has a "Clear" text button, hidden when empty).
+Selects (`ha-select` → native `<select>`) and text fields come from `tools/lists-controls.ts`
+(`renderSelect`, `renderText`), with `watchDefinitions(this, CONTROL_TAGS)`.
 
 ---
 
@@ -490,7 +479,7 @@ Registered on each `*_provider` key, consuming the matching `*_model` key:
 | `vision_provider` | `vision_model` | Vision |
 | `camera_reasoning_provider` | `camera_reasoning_model` | Camera Rsn |
 
-`options: { modelKey, role, noReset: true }`. `llm_base_url`, `custom_base_url`, `ollama_base_url`,
+Registered with `{consumes: [modelKey], noReset: true}` (`tools/models.ts`, `MODEL_ROLES`). `llm_base_url`, `custom_base_url`, `ollama_base_url`,
 `review_enabled`, `ollama_num_ctx`, `home_context_max_entities` stay generic rows in General (they
 already sit beside the model keys in catalogue order); `vision_thinking_enabled`,
 `vision_thinking_max_tokens` and `vision_min_interval` stay generic rows in Cameras, where the catalogue
@@ -518,10 +507,10 @@ Rendering (one row, two controls side by side on desktop, stacked on narrow):
    `help` for the owner **and** each consumed key (joined by a line break) when both exist.
 
 Fetching: on first render of a role and whenever its provider changes, `ws("jarvis/list_models",
-{provider})`; results cached per provider **per view instance** (a `Map<provider, Promise<string[]>>`
-on a module-level cache keyed by provider so six roles on the same provider make one call; the cache is
-cleared on `jarvis-refresh`/view reconnect and after any `*_base_url` save). Never fetch for provider
-`""`. In the harness the fixture `jarvis_list_models.json` answers every provider with the same list —
+{provider})`; results cached in a module-level `Map` keyed by provider **and** the configured base URLs (so
+six roles on one provider make one call and a base-URL save invalidates every role's list at once); the
+cache is cleared on `jarvis-refresh`. A call taking more than 15 s counts as failed locally. Never fetch for
+provider `""`. In the harness the fixture `jarvis_list_models.json` answers every provider with the same list —
 acceptable.
 
 Writes:
@@ -540,57 +529,54 @@ Writes:
 * Saving `review_provider` / `review_model` flips `review_enabled` server-side; the schema re-fetch that
   `host.save` schedules shows it on the generic `review_enabled` row (no extra work).
 
-### 4.2 Entity list picker — field editor `<jarvis-editor-entity-list>` (list keys)
+### 4.2 Entity list pickers — the built-in `<jv-picker multiple>` (list keys)
 
-Keys and options:
+Keys: `excluded_entities`, `pattern_include_entities` (limited to `binary_sensor`, `device_tracker`,
+`person`, `sensor`), `presence_only_entities`, `outdoor_entities`, `indoor_entities` — all through the
+built-in `*_entities` editor of §3.2 (`<jv-picker kind="entity" multiple>`). Every add / remove saves the
+whole array at once through the row's `onChange` (optimistic; the row reverts on failure and shows the
+error). Stored ids that no longer exist in `hass.states` are kept and tagged `not found` (never silently
+dropped).
 
-| key | `options.domains` (include filter; empty = all) | extra |
-|---|---|---|
-| `excluded_entities` | all | — |
-| `pattern_include_entities` | `["binary_sensor", "device_tracker", "person", "sensor"]` | — |
-| `voice_confirm_entities` | all | `options.allowExempt: true` → each chip has a `t("Require")` / `t("Exempt")` segmented toggle; exempt stores `"!"+id`; the chip shows the bare id with an `t("exempt")` badge (`jv-state-badge level="neutral"`). Adding from the picker stores the bare id. |
-| `presence_only_entities`, `outdoor_entities`, `indoor_entities` | all | — |
+`voice_confirm_entities` has its own editor, `<jarvis-editor-voice-confirm>` (`tools/voice-confirm-list.ts`):
 
-Control: `ha-selector` `{entity: {multiple: true, domain: options.domains}}` → `ha-entities-picker` →
-`<jv-picker multiple>` with items from `hass.states` (`{value: entity_id, label: friendly_name}`), sorted
-by label. Every add / remove saves at once: `host.save(key, nextArray)` (optimistic chip list; on
-`{ok:false}` the list reverts to `value` — the row status shows the error). A value typed in the
-fallback that is not in `hass.states` is refused with `t('"{value}" is not a known entity id')` unless
-`options.allowCustom` (not set for these keys). Stored ids that no longer exist in `hass.states` are shown
-with the id as label and a `t("not found")` badge but are **kept** (never silently dropped).
+* one `<li>` per stored entry, in stored order: friendly name, the bare id in `.jv-mono` when it differs,
+  an `exempt` badge for `"!"`-prefixed entries and a `not found` badge when HA no longer knows the id;
+* a **Require / Exempt** segmented toggle (`aria-pressed`): Require stores the bare id, Exempt stores
+  `"!" + id`; the entry keeps its position and any other entry for the same id is dropped (an id is never
+  both);
+* a 44 px `×` Remove (`aria-label` `Remove {name}`);
+* below the list a single-value `<jv-picker kind="entity">` to add: a pick appends the **bare** id
+  (ignored when the id is already listed, required or exempt); the picker never offers `!`-prefixed ids.
 
-### 4.3 Domain list — field editor `<jarvis-editor-domain-list>` (`excluded_domains`)
+Every change saves the whole array; untouched entries (including `!` exemptions) round-trip unchanged.
+Smoke: the fixture `["light.living_room", "!camera.front_door"]` renders two rows with Require / Exempt
+pressed correctly, and Exempt on the first row writes exactly `["!light.living_room", "!camera.front_door"]`.
 
-`ha-selector` `{select: {multiple: true, custom_value: true, options: domains}}` → `<jv-picker multiple
-allowCustom>`; items = distinct domains of `hass.states` sorted. Save on each change. Help text stays.
+### 4.3 Domain list — built-in `<jv-picker kind="domain" multiple allow-custom>` (`excluded_domains`)
 
-### 4.4 Label list — field editor `<jarvis-editor-label-list>` (`excluded_labels`)
+Items = distinct domains of `hass.states`; custom values allowed. Save on each change. Help text stays.
 
-Items = `data.config.available_labels` as `{value: id, label: name}`. Stored values may be ids **or**
-names (legacy): a chip resolves its label by id first, then by name, else shows the raw string. New
-selections store the **id**. `ha-selector` has a `label` selector (`{label: {multiple: true}}`) in HA ≥
-2024.4; use it when `ha-selector` is defined, else `<jv-picker multiple>` (custom typed values allowed,
-since a label may exist that the snapshot has not reported yet). Empty source → `t("No Home Assistant
-labels found.")` under the (still usable) picker.
+### 4.4 Label list — built-in `<jv-picker kind="label" multiple allow-custom>` (`excluded_labels`)
 
-### 4.5 Area pickers — `<jarvis-editor-area-list>` (list) and `<jarvis-editor-area>` (single)
+Items = `data.config.available_labels` (then `config/label_registry/list`) as `{value: id, label: name}`.
+Stored values may be ids **or** names (legacy): a chip resolves its label by id first, then by name, else
+shows the raw string. New selections store the **id**; custom typed values are allowed (a label may exist
+that the snapshot has not reported yet).
 
-Keys: list → `lab_areas` (help "Lab rooms — quiet only here" stays), `bedroom_areas`, `outdoor_areas`;
-single → `movie_area`.
+### 4.5 Area pickers — `<jv-picker kind="area">`
 
-List control: the old panel's **chip toggles** are kept as the primary UI because the area count is
-small: a `<fieldset>` of `<button type="button" class="chip jv-hit" aria-pressed>` per `data.areas[]`
-(`name`, selected = id in value), wrapping, toggling saves immediately. When `data.areas` is empty:
-`t("No rooms detected yet.")`. (`ha-selector {area:{multiple:true}}` is **not** used for lists — the chip
-fieldset is clearer and identical in HA and the harness.)
-Single control: `ha-selector` `{area: {}}` → `<select>` of `— none —` + areas. Save on change.
+List keys `lab_areas` (registered explicitly in `tools/lists.ts`), `bedroom_areas`, `outdoor_areas` (the
+built-in `*_areas` editor): `<jv-picker kind="area" multiple>`, saving the whole array of **area ids** on
+each change. Single key `movie_area`: `<jv-picker kind="area">` (placeholder `— none —`; clearing saves
+`""`). Areas come from `hass.areas`, then `data.areas`, then `config/area_registry/list`. (The old panel's
+chip toggles were not kept: the picker is the same in HA and the harness.)
 
-### 4.6 Single entity — `<jarvis-editor-entity>` (`movie_media_player`, `options.domains: ["media_player"]`)
+### 4.6 Single entity — `<jv-picker kind="entity" .domains=${["media_player"]}>` (`movie_media_player`)
 
-`ha-selector` `{entity: {domain: ["media_player"]}}` → `<jv-picker>` over `hass.states` ids with that
-domain. Clear → `""`. (The same element may be registered for `broadcast_group`,
-`departure_origin_entity`, `departure_travel_sensor`, `driving_car_sensor` with the suggestion filters of
-`presentation.ts` as `options.filter` — optional, not required by this spec.)
+Registered in `tools/lists.ts`; placeholder `— none —`; clearing saves `""`. (`broadcast_group`,
+`departure_origin_entity`, `departure_travel_sensor`, `driving_car_sensor` keep the generic row with its
+`presentation.ts` suggestions.)
 
 ### 4.7 Sentinel rules — `<jarvis-editor-toggle-list>` on `disabled_sentinel_rules` (`options.invert: true`)
 
@@ -648,11 +634,16 @@ record the user edits as a whole, and each save restarts the appliance monitor):
 
 ### 4.11 Biometric map — `<jarvis-editor-biometrics-map>` on `biometric_entities`
 
-Nine fixed rows (`heart_rate, resting_hr, sleep_stage, sleep_state, spo2, steps, respiratory, stress,
-temperature`; label = kind humanised, `_` → space), each an entity picker (`{entity:{domain:["sensor",
-"binary_sensor"]}}` → `<jv-picker>`), value = `value[kind] ?? ""`. Change → copy the dict, set or delete
-the kind, `host.save("biometric_entities", dict)`. Stored kinds outside the nine are shown after them
-with `t("unknown kind")` and a Remove button. Help under the row: `t("Optional: point a wellbeing kind at a
+Registered on the json key `biometric_entities` (`tools/biometrics-map.ts`). A `<ul class="rows">` of nine
+fixed `<li data-kind>` rows (`heart_rate, resting_hr, sleep_stage, sleep_state, spo2, steps, respiratory,
+stress, temperature` — the backend's `biometrics._KINDS`; label = a translated kind name, with the kind
+itself in `.jv-mono`), each a single `<jv-picker kind="entity" .domains=${["sensor", "binary_sensor"]}>`,
+value = `value[kind] ?? ""`. A pick sets the kind, clearing it deletes the kind; either way the **whole dict**
+is saved through the row's `onChange` (`biometric_entities`). Stored kinds outside the nine are listed after
+them (`class="unknown"`), tagged `unknown kind` with the stored value in `.jv-mono`, and a `Remove` button
+(`aria-label` `Remove {kind}`) that deletes the kind. Smoke: the fixture `{heart_rate:
+"sensor.watch_heart_rate"}` renders nine rows with the heart-rate picker on that entity; picking `steps`
+writes exactly `{heart_rate: "sensor.watch_heart_rate", steps: "sensor.watch_steps"}`. Help under the row: `t("Optional: point a wellbeing kind at a
 specific entity when auto-discovery picks the wrong one. Context only — never medical.")`. (Enabling
 the feature is the generic `biometrics_enabled` switch; the discovered-wearables list stays out, §7.)
 
@@ -661,24 +652,28 @@ the feature is the generic `biometrics_enabled` switch; the discovered-wearables
 **Decision: Settings › Governance hosts the enforcement switches.** They are configuration (persisted
 owner overrides) that the old panel kept under Settings › Governance, the catalogue's Governance category
 already holds the related keys (`autonomy_enforce`, `friday_automator`, …), and an admin looking for
-"turn the kernel's X off" looks in Settings, not Logs. The Logs view keeps its card for now; the follow-up
-for the Logs owner (not this builder) is to replace `jv-logs-governance` with a read-only summary (count
-of switches ON / overridden) and a link `navigate("settings", "governance/tool:governance")`, so there is
-one place that writes. Until then both write the same store through the same two commands and both
-re-fetch after a write, so they cannot disagree for longer than one fetch.
+"turn the kernel's X off" looks in Settings, not Logs. Done on both sides: the Logs view's
+`jv-logs-governance` is a read-only summary (counts ON / overridden, the switches away from their default)
+with a **Change in Settings** button → `/jarvis/settings/governance/tool:governance` (logs.md Card E), so
+this card is the one place that writes.
 
 Card: `<jv-section heading=t("Governance") subheading=t("Enforcement") icon="mdi:shield-check-outline">`
 with a **Refresh** icon button in `slot="actions"`. Intro paragraph (verbatim, same key the Logs view
 uses): `JARVIS's kernel brings each capability online along a shadow → parity → enforce ladder, each
 behind a kill-switch. Here you control those switches: the opt-in capabilities ship OFF (enable when
 you're ready), and the live safety guards ship ON (leave them on). Changes take effect immediately and
-survive a restart.` Then two groups (each only when non-empty), in this order:
+survive a restart.` Then up to three groups (each only when non-empty), in this order:
 
 1. `category === "capability"`: heading `Owner opt-in capabilities`, sub-text `These ship OFF. Turning
    one ON makes the kernel authoritative for that capability — your choice, behaviour-changing.`
 2. `category === "safety"`: heading `Safety & governance — kill-switches (keep ON)`, sub-text `These
    ship ON and guard autonomous behaviour. Turning one OFF reverts that guard to observe-only (log-only)
    — only for debugging.`
+3. any other `category` value: heading `Enforcement`, no sub-text (so a switch with a new category is
+   still shown).
+
+The switch list comes from `get_enforcement` only — never hard-code keys or counts (the registry grows
+with the kernel).
 
 Row: `name` (medium weight) + `phase` as a small `.jv-mono` muted tag when non-empty + `jv-state-badge
 level="warn" nodot label=t("overridden")` when `overridden` + `jv-state-badge level="neutral" nodot
@@ -739,7 +734,12 @@ energy data — {message}")` + Retry.
   `t("Disasters")`) `level="ok"` when the feed is on, `neutral` off, with the radii: `t("{km} km, M ≥
   {mag}")` for quakes, `t("{km} km")` for disasters.
 * `t("Scan now")` button (`.jv-btn.primary`; disabled with label `t("Scanning…")` while in flight; also
-  disabled when `center === null` with the note above). Click → `ws("jarvis/hazard", {action: "scan"})`;
+  disabled when `center === null` with the note above). Click → **confirm first** (`confirmDialog`, not
+  destructive: heading `Scan for hazards now?`, message `JARVIS checks USGS, NWS and NASA EONET around your
+  location once. Read-only — it never announces or alerts.`, confirm `Scan now`) → `ws("jarvis/hazard",
+  {action: "scan"})`. After 30 s without an answer the button is re-enabled and the status says `still
+  scanning in the background` (§9 R11); a re-run supersedes the earlier one (only the latest answer is
+  shown);
   a `role="status"` region shows `t("Checking USGS, NWS and NASA EONET…")` during the call, then:
   * `ok === false` → `ha-alert warning` with `res.error`;
   * all three arrays empty → `t("All clear near {lat}, {lon} — no active earthquakes, severe weather, or
@@ -772,7 +772,8 @@ Body (from `jarvis/mutes` `list`):
   destructive: true})`.
 * Chips (`<ul>`): one per `entities[]` (label = friendly name, id in `.jv-mono` title) and one per
   `categories[]` (label + `jv-state-badge level="info" nodot label=t("category")`), each with a 44 px-hit
-  `×` button `aria-label=t("Unmute {name}")` → `{action: "unmute", entity_id}` / `{…, category}`.
+  `×` button `aria-label=t("Unmute {name}")` → `{action: "unmute", entity_id}` / `{…, category}` (focus then
+  moves to the next / previous chip's `×`, else the entity picker, §4.20).
 * Empty and not `all`: `t("Nothing muted. JARVIS announces about everything it observes. Mute an entity
   below (or run jarvis.shush) to silence announcements about it without excluding it.")`.
 * Add row: an entity picker (`{entity:{}}` → `<jv-picker allowCustom>` over `hass.states`; custom allowed
@@ -842,8 +843,40 @@ right (44 px rows; on narrow the button is full width under the label):
 
 Per row: the button is disabled while its call is in flight (`t("Running…")`); success → a transient
 `role="status"` text `t("Done — check the speakers / log.")` next to the button for 4 s; failure → the
-HA error message in `--jv-danger-text` (stays until the next run). No confirmation (all are harmless
-tests), no toast.
+HA error message in `--jv-danger-text` (stays until the next run). No toast. Six rows are harmless tests
+and run at once; the **camera row asks first** (it spends LLM credits and speaks the result, like Cameras
+› Analyze now): `confirmDialog` heading `Analyze {name} now?`, message `JARVIS runs one vision → reasoning
+pass on this camera and announces the result. It uses LLM credits and takes a few seconds.`, confirm
+`Analyze now`.
+
+### 4.19 Wellbeing Context — tool card `<jarvis-tool-wellbeing>` (category Home & Extras; id `wellbeing`)
+
+A pointer card so the old Settings card's place is not a dead end: `<jv-section heading=t("Wellbeing
+Context") icon="mdi:heart-pulse">`, actions badge `ON` (`ok`) / `OFF` (`neutral`) from
+`host.value("biometrics_enabled")`, the intro `The discovered wearables and the wearable-context switch are
+on the People view. Context only — never medical.`, an `Open People` button (`navigate("people")`) and a
+`Map a kind to an entity` link → `/settings/core/biometric_entities` (§4.11). No commands.
+
+### 4.20 Keyboard focus after a row's Remove
+
+Every row removal in these editors goes through `keepRowFocus()` (`src/focus.ts`, DESIGN.md §8): after the
+host re-renders, focus moves to the same control in the **next** row, else in the **previous** row, else a
+fallback — never to `<body>`. Rows are found again by a stable key attribute read before the removal (never
+by index), through the control's own shadow root; focus only moves when the activated control had it and
+it has since fallen to `<body>`. A removal that only takes effect when the backend answers returns its
+Promise to `keepRowFocus()`; focus is placed once it settles (on the same row's control again when a failed
+write brings the row back). Lists are rendered with `repeat()` keyed by the row key so a late re-render
+never moves the focused control to another row.
+
+| editor | row / key | control | fallback when no row is left |
+|---|---|---|---|
+| Appliances (§4.10) | `.list > .row` / `data-uid` | the row's Remove | `+ Add appliance` |
+| Voice confirm (§4.2) | `.rows > li` / `data-key` (the stored entry) | `×` | the add picker |
+| Pairings (§4.9, orphaned pairings) | `.rows > li` / `data-sat` | Remove, else the row's speaker select | the empty note |
+| Biometric map (§4.11, unknown kinds) | `.rows > li` / `data-kind` | Remove, else the row's picker | — (the last fixed kind's picker is the previous row) |
+| Muted announcements (§4.15, chips) | `ul.chips > li` / `data-key` (`entity:<id>` / `category:<name>`) | the chip's `×` (disabled until `jarvis/mutes` answers, so the removal returns that call's Promise) | the add row's entity picker |
+
+The smoke test activates each Remove on the first / last / only row and asserts where focus lands.
 
 ---
 
@@ -858,13 +891,14 @@ tests), no toast.
 | T5 | Save appliances | Save button | `host.save("appliance_profile", rows)` (+ host's `jarvis/reload_appliances`) | no | "Saved — appliance monitor reloaded" | "Save failed — …" (draft kept) / "Saved — appliance monitor reload failed: …" |
 | T6 | Governance toggle | switch | `jarvis/set_enforcement {key, enabled}` then `jarvis/get_enforcement` | safety ON→OFF and capability OFF→ON | toast "{name} → ON/OFF"; row updated | toast "{name} — {message}"; switch snaps back |
 | T7 | Energy agency chip | click | `host.save("energy_agency", v)` then `jarvis/energy {action:"status"}` | no | chip pressed; status re-read | row error on the Governance row + toast |
-| T8 | Hazard scan | button | `jarvis/hazard {action:"scan"}` | no | results list / all clear | alert "Scan failed: …" |
+| T8 | Hazard scan | button | `jarvis/hazard {action:"scan"}` | **yes** (not destructive) | results list / all clear; after 30 s "still scanning in the background" | alert "Scan failed: …" |
 | T9 | Mute | button | `jarvis/mutes {action:"mute", entity_id?|category?}` | no | list replaced | toast |
 | T10 | Unmute one | chip × | `jarvis/mutes {action:"unmute", …}` | no | list replaced | toast |
 | T11 | Clear all / turn blanket off | button | `jarvis/mutes {action:"clear"}` | **yes**, destructive | list replaced | toast |
 | T12 | Brief me now | button | guard → `jarvis.briefing {announce:true}` | no (guard may refuse) | "Briefing requested — listen for it." | alert with message |
 | T13 | Test satellite audio | button | `jarvis/voice_confirm_test` | no | success/warning alert with note | error alert |
-| T14 | Diagnostics Run | button | the row's service | no | transient "Done …" | inline message |
+| T14 | Diagnostics Run | button | the row's service | camera row only | transient "Done …" | inline message |
+| T17 | Remove a row (appliance, voice-confirm entry, orphaned pairing, unknown biometric kind) | `×` / Remove | `host.save(key, next)` (appliances: draft only, then Save) | no | focus moves to the next / previous row's control or the fallback (§4.20) | row error; row stays |
 | T15 | Refresh (tool card) | icon button | that card's status command | no | re-rendered | card error state |
 | T16 | Edit schedule / Choose speakers / Change mode links | click | `navigate("settings", "<cat>/<key>")` | no | scroll + flash | — |
 
@@ -897,23 +931,24 @@ command is never queued — its control is disabled while in flight instead.
 
 | old feature | why not here | where |
 |---|---|---|
-| Floor Plan Editor (rooms, elements, background, vacuum-map / SweetHome3D import) | pointer-events editor, own spec | Phase 3 floor-plan spec |
+| Floor Plan Editor (rooms, elements, background, vacuum-map / SweetHome3D import) | pointer-events editor, own spec | editor.md (`/jarvis/residence/editor`; linked from Home & Extras › Elsewhere in the panel) |
 | Cameras: enable / disable, JARVIS-only rename (`jarvis/rename_camera`), indoor/outdoor (`jarvis/camera_location`), camera diagnostics (`jarvis/camera_diagnostics`), Camera Watch live tiles | camera commands + signed snapshots, own spec | cameras spec |
 | Doorbell Training dataset + `jarvis.train_doorbell_backlog` | dataset viewer | cameras spec |
 | Document Library (`jarvis/documents`) and semantic search (`jarvis/semantic_search`) | file upload / ingest / probe UI, own spec | documents spec |
-| Faces / voices (`jarvis/faces`, `jarvis/voices`, `jarvis/face_reference`) | identity management, own spec | identity spec |
-| Wellbeing Context enable / disable and the discovered-wearables list (`jarvis/biometrics`) | `enable`/`disable` write `jarvis_config` only (bypass `runtime_config`, same drift as §9 R3); `biometrics_enabled` is already a generic switch; the discovery list is read-only runtime data | later; only the `biometric_entities` map editor (§4.11) is in |
+| Faces / voices (`jarvis/faces`, `jarvis/voices`, `jarvis/face_reference`) | identity management, own spec | people.md |
+| Wellbeing Context enable / disable and the discovered-wearables list (`jarvis/biometrics`) | identity / wellbeing context lives with the people it describes; `biometrics_enabled` is also a generic switch | the People view (people.md); here only the `biometric_entities` map editor (§4.11) and the §4.19 pointer card |
 | Observer Tuning / Memory stats, System Diagnostics "Run check" + judgment calibration | read-only runtime stats, already on the Logs view | Logs |
 | Operational Mode chips (`jarvis/mode`) | on the Overview view | Overview |
 | Onboarding welcome card | lives on the dashboard; the view only honours its deep links | — |
-| Logs view: replacing `jv-logs-governance` with a summary + link to Settings › Governance | a different owner's file | Logs follow-up (§4.12) |
 | AI Models "retired-model self-heal" (auto-save a replacement) | silent config write on page open; replaced by an explicit "Use {model}" button | §4.1 / §9 R2 |
-| `jarvis/energy {action:"set_agency"}` | writes `jarvis_config` only and would desynchronise the catalogue; `update_config` persists to both | §4.13 / §9 R3 |
+| `jarvis/energy {action:"set_agency"}` | one write path for `energy_agency` (the catalogue row's pipeline) | §4.13 / §9 R3 |
 | `ha-slider` for 0..1 floats, shared toast helper, stale-snapshot banner | nice-to-haves from settings.md | later |
 
 ---
 
 ## 8. Strings
+
+**Phase 3 status:** every panel key is now translated in all 22 language files (`frontend/i18n-missing.json` reports nothing missing; `npm run i18n:report` regenerates it). The de.json / ✓ / ✗ columns below record what existed before the port; the code's `t()` keys (`npm run i18n:keys`) are authoritative where they differ from this list.
 
 `t()` key = the English string (placeholders `{…}`). "de" = the exact key exists today in
 `custom_components/jarvis/frontend/i18n/de.json` (checked for the rows marked; the remaining keys are
@@ -1068,11 +1103,12 @@ Humanised rule ids, kind names and the `advisory / opt-in / autonomous` chip lab
    provider stopped listing the stored one; this spec replaces that with a visible warning and a one-tap
    "Use {model}". A user whose Groq model was retired keeps a broken assistant until they tap — the
    warning must be prominent (warn-tinted note under the control, not a tooltip).
-3. **Two write paths for `energy_agency` and `biometrics_enabled`.** `jarvis/energy set_agency` and
-   `jarvis/biometrics enable|disable` write `jarvis_config` only, while `jarvis/update_config` writes
-   `runtime_config` + `jarvis_config`. `_runtime_opt` prefers `runtime_config`, so a value set through
-   the former is masked by any earlier value set through the latter. This spec uses `update_config` for
-   both keys; the backend should drop or redirect the two legacy branches (backend follow-up).
+3. **Two write paths for `energy_agency` and `biometrics_enabled`.** Resolved on the backend:
+   `jarvis/energy set_agency` and `jarvis/biometrics enable|disable` now write through
+   `config_apply.async_apply_many` (runtime_config + config.json + native entities), like
+   `jarvis/update_config`, so neither masks the other. The Energy card still saves `energy_agency` through
+   `host.save` (one pipeline, row status); `biometrics_enabled` is switched in the People view or the
+   generic row.
 4. **`list_models` never errors.** Failures come back as `{models: [], error}` with a fixed generic
    message; the specific cause is only in the HA log. Say so in the note ("see the Home Assistant log").
 5. **Consumed keys and search / deep links.** `model`, `classifier_model`, … are no longer rendered as
@@ -1099,18 +1135,18 @@ Humanised rule ids, kind names and the `advisory / opt-in / autonomous` chip lab
 11. **Hazard scan is slow and external.** Three HTTP feeds, no server timeout documented; set a local
     30 s guard on the UI (keep the request alive, but re-enable the button and say "still scanning in the
     background" after 30 s).
-12. **Fixture gaps.** `frontend/dev/fixtures/panel_data.json` has `satellites[]` with `area_id` and no
-    `area` (backend sends `area` = name), `sentinel_rules[]` with `name` instead of `desc`, and
-    `cast_devices` only two entries. The builder adds `area` and `desc` fields (keeping the existing ones
-    so other views' fixtures stay valid) and adds `jarvis_list_models.json` (`{provider: "groq", models:
-    ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "meta-llama/llama-4-scout-17b-16e-instruct"]}`),
-    `jarvis_energy.json`, `jarvis_hazard.json` (the status shape — the harness answers both actions with
-    the same file, so include `ok: true`, `earthquakes: []`, `weather: []`, `disasters: []`, `counts` as
-    well, which the status renderer ignores), `jarvis_mutes.json`, `jarvis_voice_confirm_test.json`.
-    `jarvis_get_enforcement.json` / `jarvis_set_enforcement.json` / `jarvis_reload_appliances.json` exist.
-13. **Governance in two views.** Until the Logs follow-up lands, both cards write the same store. Both
-    re-fetch after a write, and `set_enforcement` returns the refreshed row, so the only visible
-    inconsistency is between a write in one tab and a stale list in another (same as today).
+12. **Fixture gaps.** `frontend/dev/fixtures/panel_data.json` still has `satellites[]` with `area_id` and
+    no `area` (the backend sends `area` = name; the pairings editor falls back to `area_id`, then `name`),
+    and `cast_devices` with two entries; `sentinel_rules[]` now carry `desc` (the toggle list also accepts
+    a legacy `name`). `jarvis_list_models.json`, `jarvis_energy.json`, `jarvis_hazard.json` (status and scan
+    fields in one file, since the harness answers both actions with it), `jarvis_mutes.json`,
+    `jarvis_voice_confirm_test.json`, `jarvis_get_enforcement.json`, `jarvis_set_enforcement.json`,
+    `jarvis_reload_appliances.json` and the three `config_*_registry_list.json` exist; `config_schema.json`
+    carries `voice_confirm_entities = ["light.living_room", "!camera.front_door"]` and
+    `biometric_entities = {"heart_rate": "sensor.watch_heart_rate"}` (regenerated by
+    `scripts/config-schema-fixture.py`) for the smoke assertions of §4.2 / §4.11.
+13. **Governance in two views.** Resolved: only Settings › Governance writes; the Logs card is read-only and
+    re-reads `get_enforcement` on enter / Refresh, so it can lag a write by at most one fetch.
 14. **`callService` has no structured result.** The Diagnostics rows and Brief-me-now can only report
     "requested"; the real outcome is audible or in the log. Copy says so.
 15. **Translations.** ~110 new English keys; the few old upper-case HUD keys (`BRIEF ME NOW`,

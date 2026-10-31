@@ -253,6 +253,8 @@ export class JvPlanCanvas extends LitElement {
   @property({ attribute: false }) layers: Layer[] = [];
 
   @state() private _vb: ViewBox = { x: 0, y: 0, w: 320, h: 150 };
+  /** the last auto-fit viewBox: its aspect ratio sizes the narrow canvas (pan / zoom never resize it) */
+  @state() private _fitVb: ViewBox | null = null;
   @state() private _hover: Hit | null = null;
   @state() private _focus: Hit | null = null;
   @state() private _live = "";
@@ -316,8 +318,14 @@ export class JvPlanCanvas extends LitElement {
         outline: none;
         cursor: default;
       }
+      /* narrow: as tall as the fitted plan is at this width (a landscape plan gets no empty bands above
+         and below it), at least a touch-editable 260 px, at most the old cap; --jv-plan-ratio is the
+         auto-fit viewBox's w / h (set on the svg by render) */
       :host([narrow]) svg {
-        height: min(70vh, 520px);
+        height: auto;
+        aspect-ratio: var(--jv-plan-ratio, 4 / 3);
+        min-height: 260px;
+        max-height: min(70vh, 520px);
       }
       svg:focus-visible {
         box-shadow: var(--jv-focus-ring);
@@ -582,6 +590,20 @@ export class JvPlanCanvas extends LitElement {
   get pxPerUnit(): number {
     return this._metrics().s;
   }
+  /**
+   * The plan rectangle the svg actually shows: the viewBox plus the bands `meet` letterboxes around it
+   * when the element's shape differs from the viewBox's (the viewBox itself before layout).
+   */
+  get visibleBox(): ViewBox {
+    const vb = this._vb;
+    const m = this._metrics();
+    if (!m.W || !m.H) return vb;
+    return { x: vb.x - m.ox / m.s, y: vb.y - m.oy / m.s, w: m.W / m.s, h: m.H / m.s };
+  }
+  /** The auto-fit viewBox (fit()), null before the first fit; the narrow canvas takes its aspect ratio. */
+  get fittedViewBox(): ViewBox | null {
+    return this._fitVb;
+  }
 
   /** The auto viewBox: content bbox padded by max(120, 25 %) with a 200 x 140 minimum. */
   fit(): void {
@@ -600,6 +622,7 @@ export class JvPlanCanvas extends LitElement {
       h = 140;
     }
     this._vb = { x, y, w, h };
+    this._fitVb = { x, y, w, h };
   }
 
   /** Zoom by `factor` (< 1 in) about a client point (default: the centre). */
@@ -717,6 +740,8 @@ export class JvPlanCanvas extends LitElement {
     const layers = this._allLayers();
     const ctx = this.context();
     const cursor = this._panning ? "grabbing" : this._gesture?.handler?.cursor || this.cursor || "";
+    const fitted = this._fitVb;
+    const style = [cursor ? `cursor:${cursor}` : "", fitted ? `--jv-plan-ratio:${(fitted.w / fitted.h).toFixed(4)}` : ""].filter(Boolean).join(";");
     return html`
       ${layers.map((l) => (l.styles ? html`<style>${l.styles.cssText}</style>` : nothing))}
       <svg
@@ -728,7 +753,7 @@ export class JvPlanCanvas extends LitElement {
         role="application"
         aria-label=${t("Floor plan canvas")}
         aria-describedby="instructions"
-        style=${cursor ? `cursor:${cursor}` : ""}
+        style=${style}
         @pointerdown=${this._onPointerDown}
         @pointermove=${this._onPointerMove}
         @pointerup=${this._onPointerUp}
@@ -1166,9 +1191,11 @@ export const gridLayer: Layer = {
   order: LAYER_ORDER.grid,
   hits: [],
   render(ctx) {
-    const vb = ctx.viewBox;
-    const step = labelStep(vb.w);
-    const fs = Math.max(3, vb.w / 150);
+    // label spacing and size follow the zoom (the viewBox); the grid covers everything the svg shows,
+    // including the bands `meet` leaves when the canvas and the plan differ in shape
+    const step = labelStep(ctx.viewBox.w);
+    const fs = Math.max(3, ctx.viewBox.w / 150);
+    const vb = ctx.canvas.visibleBox;
     const labels: SVGTemplateResult[] = [];
     const x0 = Math.ceil(vb.x / step) * step, y0 = Math.ceil(vb.y / step) * step;
     for (let x = x0; x <= vb.x + vb.w; x += step) labels.push(svg`<text class="grid-label" x=${x + fs * 0.3} y=${vb.y + fs * 1.2} font-size=${fs}>${x}</text>`);

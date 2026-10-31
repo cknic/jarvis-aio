@@ -13,16 +13,17 @@ logic `_fetchBio / _renderBio / _wireBio` ~L7953–8012), plus the backend in
 **not** need to open the old panel; every contract it needs is recorded here.
 
 Route: `/jarvis/people` (`route.path === "/people"`). Element `<jarvis-view-people>` in
-`src/views/people.ts` (+ `src/views/people/*.ts`). Registering the view (`src/views/index.ts`, suggested
-entry `{ key: "people", title: "People", icon: "mdi:account-group-outline", element: "jarvis-view-people" }`,
-placed after `memory`) is a scaffold-owned change: ask the scaffold owner, do not edit the registry yourself.
+`src/views/people.ts` (+ `src/views/people/`: `face-card.ts`, `lightbox.ts`, `image.ts`, `record-wav.ts`,
+`format.ts`, `styles.ts`, `types.ts`). Registered in `src/views/index.ts` as `{ key: "people", title:
+"People", icon: "mdi:account-group-outline", element: "jarvis-view-people" }`, fourth in `VIEWS` (after
+`cameras`, before `suggestions`); on narrow it is reached through the bottom nav's "More" sheet.
 
 The whole panel is `require_admin=True`. **Everything on this page is biometric data about other
 people** (face frames, reference photos, voiceprints, wearable readings). Every command below is
 admin-only end to end (`_deny_non_admin` on every action of `jarvis/faces` and `jarvis/voices`, including
 `list`; `@require_admin` on `jarvis/face_reference`, `jarvis/camera_snapshot`, `jarvis/update_config`;
 `enable`/`disable` of `jarvis/biometrics`; the `faces` kind of `/api/jarvis/snapshot/` answers 401 to a
-non-admin). A non-admin never reaches the view, but if any call ever rejects with `code: "unauthorized"`
+non-admin; `jarvis/biometrics status` is open). A non-admin never reaches the view, but if any call ever rejects with `code: "unauthorized"`
 show its message in that card's error slot and stop retrying.
 
 ---
@@ -229,10 +230,11 @@ duplicate.
 }
 ```
 
-`enable` / `disable` are admin-gated; `status` is open. `enable`/`disable` call
-`jarvis_config.set("biometrics_enabled", True|False)` directly (**not** `config_apply` — see Risk 9) and
-`jarvis_log("BIO", …)`. Then, for every action, discovery runs over **all** `sensor.*` + `binary_sensor.*`
-states (regardless of `enabled`) and the response is:
+`enable` / `disable` are admin-gated; `status` is open. `enable`/`disable` write `biometrics_enabled`
+through `config_apply.async_apply_many` (runtime_config + config.json + native entity; see Risk 9) and
+`jarvis_log("BIO", …)`. The response's `enabled` is read back from `jarvis_config`. Then, for every action,
+discovery runs over **all** `sensor.*` + `binary_sensor.*` states (regardless of `enabled`) and the
+response is:
 
 ```ts
 interface BiometricsResponse {
@@ -262,7 +264,7 @@ cached 240 s) and set `<img src>` only once the signed URL resolves — the smok
 `/api/` src. To **read the bytes** of a pinned frame (for "Label" / "From sighting") `fetch(signedUrl)`
 works because the signature is in the query string; never fetch the raw path.
 
-### 2.7 `jarvis/update_config` — the four keys this view writes
+### 2.7 `jarvis/update_config` — the five keys this view writes
 
 ```python
 @websocket_api.require_admin
@@ -283,8 +285,9 @@ coercion — send the right JSON type.
 | `voice_recognition_delegate_stt` | str | `""` | "Delegate STT" / voice | Voices text field (shown only when local is on); `VoicesResponse.delegate_stt`, `data.config.voice_recognition_delegate_stt` |
 | `voice_embedding_model_path` | str | `""` | "Speaker embedding model path" / voice | Voices text field (shown only when local is on); `VoicesResponse.model_path` |
 
-(`biometrics_enabled` is also a catalogue key, but this view toggles it through `jarvis/biometrics` for
-parity and because that command returns the discovery list in the same round trip.)
+…and a fifth: `biometrics_enabled` (bool, default `false`, catalogue key) — the Wellbeing switch writes it
+through `jarvis/update_config` (the single write path Settings uses too) and then re-reads
+`jarvis/biometrics {action: "status"}` for the discovery list (A17).
 
 ### 2.8 `jarvis/get_panel_data` — snapshot fields read (optional)
 
@@ -313,8 +316,8 @@ None. The old Faces tab made no `hass.callService` call.
 | `jarvis/faces {action:"list", limit:60}` | `firstUpdated`; Refresh button; after every faces mutation (the mutation response *is* a fresh list — use it and skip the extra call); after `llm_face_recognition` is written |
 | `jarvis/face_reference` | lazily per resident card that has `hasReference` and no pinned snapshot; cached per norm name |
 | `jarvis/camera_snapshot` | lazily per card with a `camera_entity` but neither pinned snapshot nor reference; cached per camera; and on "Snapshot now" |
-| `jarvis/voices {action:"list"}` | `firstUpdated`; Refresh; after enroll/forget (response is the list); after a voice config write; optionally every 20 s while the view is visible (the `current` readout is a 20 s window — the old panel never auto-refreshed it; refreshing on the shell's `data` change is the cheap way: re-fetch in `updated()` when `data` changed, throttled to ≥ 15 s) |
-| `jarvis/biometrics {action:"status"}` | `firstUpdated`; Refresh; after enable/disable (response is the new status) |
+| `jarvis/voices {action:"list"}` | `firstUpdated`; Refresh; after enroll/forget (response is the list); after a voice config write; and quietly on every new shell snapshot (`updated()` when `data` changed, not while a voice action or a recording is in flight; a failed quiet refetch keeps the last list) so the 20 s `current` readout stays live |
+| `jarvis/biometrics {action:"status"}` | `firstUpdated`; Refresh; after the Wellbeing switch's `update_config` write |
 | `auth/sign_path` | whenever an `<img>` is rendered with an unsigned `/api/` path (signPath caches) |
 
 ---
@@ -532,7 +535,7 @@ the `<jv-section>`).
 | A14 | `Record & enroll` | validate name (else toast `Name the voice first`); record 4 s (§3.9); `jarvis/voices {action:"enroll", name, audio}` | No | replace voices state from the response; clear name; toast `Enrolled {name} ({count} samples)` (count from the matching profile) | mic error → toast `Microphone unavailable — {message}`; empty clip → `No audio captured`; WS error → its message (`enroll_failed` text is user-readable) |
 | A15 | `Identify` | record 4 s; `jarvis/voices {action:"identify", audio}` | No | `match?.name` → toast `Heard: {name} ({score}%)` + `, guess` when `!trusted`; else `No confident match`. Also render the result inline under the status row (`aria-live`) so it survives the toast | as A14 |
 | A16 | `Forget voiceprint` | `jarvis/voices {action:"forget", name}` | **Yes** — `confirmDialog({heading: t("Forget the voiceprint for {name}?"), message: t("JARVIS will no longer recognize this voice until it is enrolled again."), confirmLabel: t("Forget"), destructive: true})` | replace state; toast `Forgot the voiceprint for {name}` | toast |
-| A17 | `Use wearable context` switch | `jarvis/biometrics {action: on ? "enable" : "disable"}` | No (opt-in toggle; the card text is the disclosure) | replace biometrics state from the response; toast `Wellbeing context on` / `Wellbeing context off` | roll back; toast |
+| A17 | `Use wearable context` switch | `jarvis/update_config {key:"biometrics_enabled", value:<bool>}`, then `jarvis/biometrics {action:"status"}` | No (opt-in toggle; the card text is the disclosure) | optimistic; replace biometrics state from the status response; toast `Wellbeing context on` / `Wellbeing context off`; `refresh()` | roll back; toast |
 | A18 | `Thresholds are in Settings` / `Change in Settings → Cameras` links | `navigate("settings", "voice")` / `navigate("settings", "cameras")` | No | — | — |
 
 Concurrency: one in-flight faces mutation at a time (queue or ignore clicks); per-card pending flags for
@@ -727,7 +730,8 @@ Every user-visible string is a `t()` key (English text). Checked against `custom
 | `Wellbeing context on` / `Wellbeing context off` | ✗ |
 
 Not translated: entity ids, camera slugs, `recognition_source` values, biometric `kind` tokens, model
-paths, numbers, the `jarvis_face_recognized` event name.
+paths, numbers, the `jarvis_face_recognized` event name. Since Phase 3 every key is translated in all 22
+language files (`frontend/i18n-missing.json`); the de.json column records the state before the port.
 
 ---
 
@@ -740,9 +744,9 @@ paths, numbers, the `jarvis_face_recognized` event name.
 | Per-profile sample management (list / delete individual samples) | `voice_roster` stores one running-mean centroid per person; there are no individual samples to show. |
 | Threshold sliders for voice trust / guess / min samples | Catalogue keys in Settings (`voice_local_*`); link instead of duplicating. |
 | `voice_recognition_source`, `identity_voice_fingerprint`, `voice_recognition_auto_enroll` (external speaker service) | Plain settings in Settings → Voice & Audio; this view shows in-process ID only (parity). |
-| `biometric_entities` override editor | JSON field in Settings → Home & Extras; the view shows what discovery found. |
+| `biometric_entities` override editor | Settings → General's biometric map editor (nine kind → entity pickers, settings-tools.md §4.11; Settings › Home & Extras has a Wellbeing pointer card back to this view); the view shows what discovery found. |
 | Listing discovered wearables while Wellbeing is **off** | Parity and privacy: the old panel hid them; keep health data off-screen until opted in. |
-| Camera Watch tiles, camera rename/location, doorbell training | Cameras tooling, separate Phase 3 spec. |
+| Camera Watch tiles, camera rename/location, doorbell training | the Cameras view (cameras.md). |
 | Deleting pinned recognition snapshots | No backend action exists (`_MAX_FACE_SNAPSHOTS` pruning only). |
 | Editing the external `recognition_source` here | One place only (Settings → Cameras); the view shows it read-only with a link. |
 | Unicode glyph prefixes ("◉", "⟳", "📷", "🎤", "✓", "✗") in button text | Replaced by `mdi:` icons; part of the HUD look. |
@@ -778,10 +782,11 @@ paths, numbers, the `jarvis_face_recognized` event name.
    matcher and the intrusion stand-down only consider **residents**, so an unknown face named "Alex" stays
    a guest until "Make resident" / "Add resident". The A7 toast suffix says so; a one-tap follow-up could
    be added later.
-9. **Two write paths for `biometrics_enabled`.** `jarvis/biometrics enable` calls `jarvis_config.set`
-   (config.json) while Settings writes through `config_apply.async_apply` (runtime_config + persistence).
-   `biometrics.is_enabled()` reads `jarvis_config.get`. The two can disagree for the Settings switch;
-   this view must trust the `enabled` returned by `jarvis/biometrics`, which is what the backend acts on.
+9. **Two write paths for `biometrics_enabled`.** Resolved: `jarvis/biometrics enable|disable` now write
+   through `config_apply.async_apply_many` like `jarvis/update_config`, so neither masks the other. The
+   view uses `update_config` (one pipeline with Settings) and trusts the `enabled` returned by the
+   following `jarvis/biometrics status`, which is what the backend acts on (`biometrics.is_enabled()`
+   reads `jarvis_config.get`).
 10. **Discovery heuristics are loose.** `biometrics._classify` walks the kinds in order and matches on
     keywords in `entity_id + friendly_name` *or* on the unit: `"sleep"` catches `binary_sensor.bedroom_sleep_mode`,
     `"stress"` and `"_hr"` are substrings, and **every sensor with unit `%` that matched no earlier keyword
@@ -807,6 +812,7 @@ paths, numbers, the `jarvis_face_recognized` event name.
     keys with CSS styling. `Lets JARVIS read a connected wearable` exists only as a prefix; the full
     sentence is the new key.
 17. **`jarvis/faces list` is admin-gated** (unlike most `status` reads); `tests/unit/test_ws_contract.py`
-    pins that every `jarvis/*` literal in `frontend/src` is registered — all five commands here are.
+    pins that every `jarvis/*` literal in `frontend/src` is registered — all six commands here
+    (`faces`, `face_reference`, `camera_snapshot`, `voices`, `biometrics`, `update_config`) are.
 18. **`remove_resident` deletes the reference photo** server-side; the confirm text must say so and the
     client cache for that name must be dropped, or the card would show a stale photo after re-adding.

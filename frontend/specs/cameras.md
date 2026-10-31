@@ -22,16 +22,17 @@ diagnostics" (~L5650), the floor-plan editor's "Compute coverage" (~L7343–7358
 **not** need to open the old panel; every contract it needs is here.
 
 Route: `/jarvis/cameras` (panel `route.path === "/cameras"`); element `<jarvis-view-cameras>` in
-`src/views/cameras.ts` (+ `src/views/cameras/*.ts`), extending `JarvisView` (`src/views/view-base.ts`:
+`src/views/cameras.ts` (+ `src/views/cameras/`: `watch.ts` `<jarvis-cam-watch>`, `list.ts` `<jarvis-cam-list>`,
+`doorbell.ts` `<jarvis-cam-doorbell>`, `model.ts` pure helpers), extending `JarvisView` (`src/views/view-base.ts`:
 `hass`, `narrow`, `data`, `route`, `subPath`, `refresh()`, `navigate(view, path)`, `ws<T>(type, payload)`).
 Helpers: `signPath(hass, path, expires?)` and `WsError` (`src/ws.ts`), `t()` (`src/i18n.ts`), `haDefined()` /
 `watchDefinitions()` (`src/ha.ts`), `jv-section`, `jv-empty`, `jv-kv`, `jv-state-badge`, `confirmDialog()`
 (`src/components/`). Admin-only like the whole panel (`require_admin=True`; every command below is
 `@websocket_api.require_admin`, pinned by `tests/unit/test_admin_gating.py`).
 
-The view is **not yet in the registry**: `src/views/index.ts` (scaffold-owned) needs one import line and one
-`VIEWS` entry — `{ key: "cameras", title: "Cameras", icon: "mdi:cctv", element: "jarvis-view-cameras" }` —
-placed after `residence` and before `logs`. That is the only shared-file edit; see Risks R1.
+The view is registered in `src/views/index.ts`: `{ key: "cameras", title: "Cameras", icon: "mdi:cctv",
+element: "jarvis-view-cameras" }`, third in `VIEWS` (after `intrusion`, before `people`). It is not one of
+the narrow bottom nav's `PRIMARY_NAV` items, so on phones it is reached through the "More" sheet (R1, R13).
 
 ---
 
@@ -39,7 +40,8 @@ placed after `residence` and before `logs`. That is the only shared-file edit; s
 
 One page for everything camera-shaped that the old panel spread over three tabs:
 
-* **watch** a camera live (the Camera Watch tile with its three-tier frame fallback chain), with the view
+* **watch** a camera live (the Camera Watch tile with its frame fallback chain: HA's own stream player, then
+  signed MJPEG / stills, then JARVIS's snapshot), with the view
   jumping to the camera that just saw something (`jarvis_camera_event`, confident `jarvis_face_recognized`),
   a one-tap **DIAG** probe that explains *why* a tile is blank, and **Analyze now** (`jarvis.analyze_camera`)
   for an on-demand vision → reasoning pass on the selected camera;
@@ -153,19 +155,26 @@ const src = ov[entity] && ov[entity] !== entity && hass.states?.[ov[entity]] ? o
 // mirrors camera.resolve_camera_source: the override is ignored when its target does not exist
 ```
 
-An `<img>` cannot carry the bearer token, and the smoke test (`scripts/smoke.mjs`) fails on any `/api/`
-image `src` without `authSig`, so **both proxy tiers go through `auth/sign_path`**:
+When HA's `<ha-camera-stream>` element is defined (inside Home Assistant), the chain **starts** with it —
+the only tier that plays WebRTC-only Nest cams live. Otherwise (harness, smoke test, a stripped-down HA)
+it starts at the MJPEG `stream` tier. An `<img>` cannot carry the bearer token, and the smoke test
+(`scripts/smoke.mjs`) fails on any `/api/` image `src` without `authSig`, so **both proxy tiers go through
+`auth/sign_path`**:
 
 | tier | URL | how | watchdog |
 |---|---|---|---|
-| 1 `stream` | `/api/camera_proxy_stream/<src>` | `img.src = await signPath(hass, path)` (300 s signature; validated once when the MJPEG request opens, the stream keeps running after expiry) | 6000 ms: escalate when the `<img>` has no decoded pixels (`naturalWidth === 0`) **or** its mean luma ≤ 10 (black stream — Nest MJPEG decodes a steady black frame) |
+| 0 `ha-stream` | HA's player | `<ha-camera-stream .hass .stateObj=${hass.states[src]} .muted=${true} .controls=${false} .allowExoPlayer=${true}>` (HLS / WebRTC / MJPEG as HA decides) | 8000 ms: decoded pixels are looked for **inside its shadow tree, through nested shadow roots** (`decodedInTree`, ≤ 6 levels: a `<video>` with `videoWidth > 0` or `readyState >= 2`, or an `<img>` with `naturalWidth > 0`); none decoded — or no media element rendered at all — escalates **straight to tier 2 `still`** (no luma test on this tier) |
+| 1 `stream` (only without `ha-camera-stream`) | `/api/camera_proxy_stream/<src>` | `img.src = await signPath(hass, path)` (300 s signature; validated once when the MJPEG request opens, the stream keeps running after expiry) | 6000 ms: escalate when the `<img>` has no decoded pixels (`naturalWidth === 0`) **or** its mean luma ≤ 10 (black stream — Nest MJPEG decodes a steady black frame) |
 | 2 `still` | `/api/camera_proxy/<src>` | refreshed every 2000 ms. **Sign each refresh with the cache-buster inside the signed path** — `hass.callWS({type: "auth/sign_path", path: \`/api/camera_proxy/${src}?_=${Date.now()}\`, expires: 30})` → `img.src = res.path` — because HA signs the query parameters too (`async_sign_path` puts `params` in the JWT and `async_validate_signed_request` compares them; only `width`/`height` are exempt), so appending `&_=…` *after* signing 401s. Call `auth/sign_path` directly here, not `signPath()`, whose cache is keyed by the full path and would grow by one entry per refresh. | 5000 ms after the first still: same no-pixels / black test |
 | 3 `jarvis` | `jarvis/camera_snapshot` (below) | `img.src = \`data:image/jpeg;base64,${image}\`` every 6000 ms | none — last tier |
 
-Escalation triggers: the `<img>` `error` event (404/401/connection refused) or the watchdog. Tier 1 → 2 → 3.
-A camera that reached tier 3 is remembered **per entity for the session** (`Map<entity, "jarvis">`): re-selecting
-it skips tiers 1–2 (the old panel's `_camModeByEntity`). Changing the selected camera, the resolved source or a
-re-sign clears the timers and restarts at tier 1 (or 3 when remembered). The luma test:
+Escalation triggers: the `<img>` `error` event (404/401/connection refused, tiers 1–2) or the watchdog.
+Tier 0 → 2 → 3 inside HA, tier 1 → 2 → 3 without `ha-camera-stream`. While waiting, a 1.5 s poll flips the
+tile to "has a frame" as soon as pixels decode (MJPEG never fires `load`). A camera that reached tier 3 is
+remembered **per entity for the session** (`Map<entity, "jarvis">`): re-selecting it skips straight to tier 3
+(the old panel's `_camModeByEntity`). Changing the shown camera (pick or event focus), the resolved source,
+its availability or the connection clears the timers and restarts the chain; every timer carries the chain
+sequence it was armed for and is a no-op once that changed. The luma test:
 
 ```ts
 // mean luminance of the CURRENT frame via a 32×32 canvas; null = cannot sample (no pixels yet, no 2d
@@ -234,7 +243,11 @@ Probe = {
 Error: `camera_diag_failed`. Side effect: `jarvis_log("CAMERA", "diag <entity>: <verdict>")` — the verdict is
 also visible on the Logs view (CAMERA category). The old UI added a client-side **TILE** line (current tier,
 decoded `naturalWidth×naturalHeight`, luma and "BLACK STREAM" when ≤ 10) and a hint when `platforms` has no
-`nest` key (§3.1). Tier/verdict text is backend English: show verbatim, never through `t()`.
+`nest` key (§3.1); the new view keeps both, and for the `ha-stream` tier reads the decoded size from HA's
+player through its nested shadow roots (`decodedSizeInTree`: the first `<video>`'s
+`videoWidth×videoHeight` or `<img>`'s natural size; luma is only sampled for the view's own `<img>`), so a
+playing `ha-camera-stream` no longer reports "no decoded pixels". Tier/verdict text is backend English: show
+verbatim, never through `t()`.
 
 ### 2.5 `jarvis/rename_camera` — JARVIS-only display name
 
@@ -266,7 +279,9 @@ the response and `refresh()`.
 
 Pins the lower-cased exact entity id into `indoor_entities` / `outdoor_entities` (and out of the other);
 `auto` removes it from both so heuristics resume. Globs the user wrote by hand in those lists are preserved.
-Governs the intrusion investigator, the notable-outdoor-event filter and the motion scan immediately.
+Both lists are written through `config_apply.async_apply_many` (runtime_config, config.json, coordinator,
+native setting entities), so Settings › Cameras shows the new lists at once. Governs the intrusion
+investigator, the notable-outdoor-event filter and the motion scan immediately.
 Response: `{ ok: true; cameras: Camera[] }` (read the new `outdoor` for the "Auto (indoor)" label). Errors:
 `unknown_camera`, `camera_location_failed`. Logs `CONFIG  camera <id> location → INDOOR|OUTDOOR|AUTO (heuristics)`.
 
@@ -342,7 +357,7 @@ camera the user picked. A new event restarts the 25 s. Unsubscribe and clear the
 | data | when |
 |---|---|
 | snapshot (`cameras`, overrides, names, `doorbell_training`, config values) | shell poll (20 s) + `refresh()` after every mutation |
-| tier-1 stream | on select / source change; re-attached when the shell replaces the `<img>` |
+| tier-0 `ha-camera-stream` / tier-1 stream | on select / source change; re-attached when the shell replaces the element |
 | tier-2 still | every 2 s while in tier 2 |
 | `jarvis/camera_snapshot` | every 6 s while in tier 3 (skip while one is in flight) |
 | `jarvis/camera_diagnostics` | on DIAG click only |
@@ -360,18 +375,19 @@ nothing scrolls horizontally at 360 px.
 
 ### 3.1 Card A — "Camera Watch" (`icon="mdi:cctv"`)
 
-Header right: `<jv-state-badge>`: `level="ok" pulse` + "Live" (tier 1/2 with frames), `level="danger" pulse`
+Header right: `<jv-state-badge>`: `level="ok" pulse` + "Live" (tier 0/1/2 with frames), `level="danger" pulse`
 + "Event" (focus active), `level="warn"` + "Snapshot" (tier 3), `level="neutral"` + "No signal" (tier 3 with
-`image: null`), `level="neutral" nodot` + "Unavailable" (source state `unavailable` / missing).
+`image: null` or a snapshot error), `level="neutral" nodot` + "Unavailable" (source state `unavailable` /
+missing), `level="neutral" nodot` + "Connecting…" (tier 0/1/2 before the first frame).
 
 1. **Camera picker** — a horizontally wrapping chip row (`role="radiogroup"`, each chip a `<button
-   role="radio" aria-checked>`) of the **enabled** cameras (`enabled !== false`) in snapshot order; label =
-   `name`. The selected chip uses `--jv-accent` (+ `--jv-on-accent` text); the event-focused chip carries a
+   role="radio" aria-checked>`, roving `tabindex`, arrow keys / Home / End move the pick) of the **enabled**
+   cameras (`enabled !== false`) in snapshot order; label = `name`, `title` = entity id. The selected chip uses `--jv-accent` (+ `--jv-on-accent` text); the event-focused chip carries a
    `--jv-danger` ring. Remember the explicit pick per browser in `localStorage["jarvis_active_cam"]`
    (try/catch; the old key, keep it) and restore it when it is still an enabled camera, else select the first.
    > 8 cameras: still chips, wrapping (no `<select>` — the picker must be tappable while the stream plays).
-2. **Tile** — `aspect-ratio: 16/9`, `--jv-surface-2` background, `<img alt=t("Live view of {name}")>` filling
-   it (`object-fit: contain`). Overlays, each a `--jv-neutral-soft`/`--jv-danger-soft` pill with text:
+2. **Tile** — `aspect-ratio: 16/9`, `--jv-surface-2` background, `<ha-camera-stream>` (tier 0) or
+   `<img alt=t("Live view of {name}")>` filling it (`object-fit: contain`). Overlays, each a `--jv-neutral-soft`/`--jv-danger-soft` pill with text:
    top-left the entity id (`--jv-font-code`), top-right the EVENT pill `EVENT · {label}{ · n%}` while focused;
    centred placeholder text when there is nothing to show (§5). No vignette, no scanlines, no glyphs.
 3. **Source strip** (one line under the tile, `--jv-text-2`, wraps on narrow): `Source {name} → {source
@@ -387,11 +403,12 @@ Header right: `<jv-state-badge>`: `level="ok" pulse` + "Live" (tier 1/2 with fra
    * `HA CAMERAS` line: `platforms` as `nest×2  frigate×3  ?×1`, and when no key contains `nest`, the old
      hint "No nest-platform entities: the Google Nest integration isn't delivering cameras to HA. Fix that
      first (SDM credentials / integration setup); JARVIS can only consume what HA has." (`--jv-danger-text`);
-   * probe header `{entity_id}  state={state}  platform={platform ?? "?"}  stream={frontend_stream_type}`
-     (last only when non-empty); one line per tier `  {tier}: {detail}` coloured `--jv-ok-text` when detail
+   * probe header `{entity_id}  state={state}  platform={platform ?? "?"}  stream={frontend_stream_type}
+     override={override}` (the last two only when non-empty); one line per tier `  {tier}: {detail}` coloured `--jv-ok-text` when detail
      starts with `OK`, else `--jv-danger-text`; verdict line in bold + ` ({elapsed_ms} ms)` when present;
-   * footer "Tap DIAG again to close · the verdict is also in the Logs view" with a link to `logs`.
-   * error: `<ha-alert alert-type="error">` with `WsError.message`; for `unknown_command` the message
+   * footer "Tap DIAG again to close · the verdict is also in the Logs view" with a `Logs` link button.
+   * error: `<ha-alert alert-type="error" title="Diagnostics">` (a `role="alert"` box without HA elements)
+     with `WsError.message`; for `unknown_command` the message
      "Restart Home Assistant to load the updated integration, then refresh." (§6).
 
 ### 3.2 Card B — "Cameras" (`icon="mdi:camera-outline"`, subheading = "Names are JARVIS-only (HA untouched;
@@ -437,11 +454,10 @@ JARVIS's visitor training data. Each press is logged automatically; run a backlo
 recorded-event history into the dataset.")
 
 1. **Controls row**: `Scan backlog` (primary; shows `Scanning…` with `disabled` until the service promise
-   settles), a number field `Max events` (`min=1 max=500 step=1`, default 40, invalid/empty → 40) and,
-   optionally, `Run doorbell diagnostics` (secondary; calls `jarvis.diagnose_doorbell`; if the view
-   subscribes to `jarvis_doorbell_diag` it renders `verdict` and the `checks` as ok/fail lines, otherwise a
-   toast "Doorbell diagnostics ran — see the Home Assistant log"). The optional button is **not required**
-   for parity with this task's scope; include it only if cheap.
+   settles), a number field `Max events` (`min=1 max=500 step=1`, default 40, invalid/empty → 40) and
+   `Run doorbell diagnostics` (secondary; calls `jarvis.diagnose_doorbell`, disabled while it runs, then the
+   toast "Doorbell diagnostics ran — see the Home Assistant log"; the view does not subscribe to
+   `jarvis_doorbell_diag`).
 2. **Stats line** (`aria-live`): `{total} analysed · {notable} notable` and `by_source` as
    `live {n} · event-media {n} · backlog {n}` ("none yet" when empty); `first`/`last` as a muted
    "{first} – {last}" range when both exist (HA locale date formatting).
@@ -460,18 +476,20 @@ recorded-event history into the dataset.")
 | chip tap | select camera; persist to `localStorage`; clear focus; restart chain | – | tile re-attaches; strip updates |
 | `<img>` error / watchdog | escalate tier (§2.3) | – | badge + strip tier text; no toast |
 | DIAG | `jarvis/camera_diagnostics {entity_id}` | – | panel opens with "Probing…", then lines; button disabled ≤ 30 s; second tap closes |
-| Analyze now | `hass.callService("jarvis", "analyze_camera", {entity_id, announce})` | – | button `Analyzing…` + disabled until settled; success toast "Camera review ran — check Logs for the result" with a Logs link; error toast with the message. Refuse with "No camera selected" when nothing is selected. |
-| enable switch | `jarvis/update_config {key: "disabled_cameras", value}` (§2.7) | – | optimistic; toast "Camera enabled"/"Camera disabled"; rollback + error toast; `refresh()` |
+| Analyze now | `hass.callService("jarvis", "analyze_camera", {entity_id, announce})` on the **shown** camera (the event focus wins over the pick) | **yes** (`confirmDialog`, not destructive): heading `Analyze {name} now?`, body "JARVIS runs one vision → reasoning pass on this camera. It uses LLM credits and takes a few seconds.", confirm "Analyze now" | button `Analyzing…` + disabled until settled; success toast "Camera review ran — check Logs for the result" with a Logs link; error toast `Analysis failed — {message}`. Refuse with "No camera selected" when nothing is selected. |
+| enable switch | `jarvis/update_config {key: "disabled_cameras", value}` (§2.7) | – | optimistic; toast "Camera enabled"/"Camera disabled"; rollback + row error + toast `Couldn't save — {message}`; `refresh()` |
 | Enable all / Disable all | same with `[]` / all ids | **Disable all** confirms (`confirmDialog`, not destructive): heading "Disable all cameras?", body "JARVIS will stop watching every camera — doorbell analysis, package detection and intrusion confirmation go blind until you enable one again." | toast "All cameras enabled"/"All cameras disabled" |
-| name Enter / blur (changed) | `jarvis/rename_camera {entity_id, name}` (`""` → revert) | – | row shows saving → saved tick for 2 s; toast `Renamed to "{name}"` / "Name reverted"; error toast + restore field value |
-| location segment | `jarvis/camera_location {entity_id, mode}` | – | row control disabled while saving; toast `{name} → {mode}` ("auto (indoor)" form for auto); patch `cameras` from the response; `refresh()` |
+| name Enter / blur (changed) | `jarvis/rename_camera {entity_id, name}` (trimmed; `""` → revert) | – | row shows `Saving…` → `Saved` for 2 s; toast `Renamed to "{name}"` / "Name reverted"; error: row error + toast `Rename failed — {message}` + restore field value |
+| location segment | `jarvis/camera_location {entity_id, mode}` only (the backend writes both lists through `config_apply.async_apply_many`, §2.6, so Settings › Cameras shows them on its next `jarvis/config_schema` read) | – | row control disabled while saving; toast `{name} → {mode}` ("auto (indoor)" form for auto); patch `cameras` from the response; `refresh()`; error: row error + toast `Couldn't save — {message}` |
 | related-settings row | `navigate("settings", "cameras/<key>")` | – | – |
-| Scan backlog | `hass.callService("jarvis", "train_doorbell_backlog", {limit})` | – | toast "Scanning doorbell backlog (up to {limit})…" immediately; button `Scanning…`; when settled: toast "Backlog scan finished — see Logs for the report" + `refresh()`; the old panel also re-fetched 4 s later because the scan ran on — keep one extra `refresh()` 4 s after settle |
-| Run doorbell diagnostics (optional) | `hass.callService("jarvis", "diagnose_doorbell", {})` | – | see §3.3 |
+| Scan backlog | `hass.callService("jarvis", "train_doorbell_backlog", {limit})` | **yes** (`confirmDialog`): heading "Scan the doorbell backlog?", body "Analyse up to {limit} recorded doorbell events? Each one is a vision LLM call, so this uses LLM credits and can take minutes.", confirm "Scan backlog" | toast "Scanning doorbell backlog (up to {limit})…" immediately; button `Scanning…`; when settled: toast "Backlog scan finished — see Logs for the report" (Logs link) + `refresh()`; the old panel also re-fetched 4 s later because the scan ran on — keep one extra `refresh()` 4 s after settle; `timeout` → "Scan still running — the dataset updates when it finishes" (R5); other errors `Backlog scan failed — {message}` |
+| Run doorbell diagnostics | `hass.callService("jarvis", "diagnose_doorbell", {})` | – | see §3.3; error toast `Doorbell diagnostics failed — {message}` |
 | bus event | select the event camera, EVENT badge, 25 s revert | – | optional toast `Event · {camera} — camera focused` (the old panel toasted; keep it quiet on narrow) |
 
-Toasts: use whatever shared helper exists; otherwise the per-view fallback other views use (an
-`aria-live="polite"` region at the end of the view). Errors always show the `WsError.message`.
+Toasts: the cards dispatch `jarvis-cam-toast {message, link?}` and the view shows it — inside Home Assistant
+(when `<home-assistant>` is defined) as HA's own toast via `hass-notification {message, action?}` (the
+`Logs` link becomes the toast action), elsewhere (harness, tests) in the view's own `aria-live="polite"`
+region for 5 s. Errors always show the `WsError.message`.
 
 ---
 
@@ -479,7 +497,7 @@ Toasts: use whatever shared helper exists; otherwise the per-view fallback other
 
 | region | loading | empty | error | notes |
 |---|---|---|---|---|
-| whole view | `data === null` → three `<jv-section loading>` skeletons | – | shell shows the WS alert | – |
+| whole view | `data === null` → three `<jv-section loading>` skeletons (Camera Watch with a `Loading…` `jv-empty`) | – | shell shows the WS alert | – |
 | Camera Watch | – | `cameras.length === 0` → `<jv-empty icon="mdi:cctv-off" heading=t("No camera entities in Home Assistant.") message=t("Add a camera integration (Nest, Frigate, UniFi, generic …) and it appears here.")>`; all disabled → `heading=t("All cameras are disabled")`, `message=t("Enable at least one camera below to watch it here.")` | tier-3 `unknown_command` → placeholder "JARVIS snapshot unavailable — restart Home Assistant to load the updated integration, then refresh."; other tier-3 error → "JARVIS snapshot error — {message}" (first 120 chars) | tile placeholders: "No camera selected" (nothing selected), "Connecting…" (tier 1 before the first frame), "No frame — camera idle or unreachable. For Nest: verify the Google Nest integration is loaded and events are enabled." (tier 3 `image: null`), "Unavailable in Home Assistant" (source state `unavailable`/missing) |
 | DIAG panel | "Probing {entity}… may take up to 30 s (stream wake)" | – | `ha-alert` error with message; `unknown_command` hint | closes on second DIAG tap |
 | Cameras | – | `<jv-empty>` "No camera entities in Home Assistant." | per-row inline error (`--jv-danger-text`) + toast | disabled rows stay visible |
@@ -605,6 +623,15 @@ Add a camera integration (Nest, Frigate, UniFi, generic …) and it appears here
 Home Assistant connection not available
 ```
 
+Also used by the code (added during the build): `Loading…`, `Saving…`, `Saved`, `Logs`, `Analyze {name} now?`,
+`JARVIS runs one vision → reasoning pass on this camera. It uses LLM credits and takes a few seconds.`,
+`Analysis failed —`, `Scan the doorbell backlog?`, `Analyse up to {limit} recorded doorbell events? Each one is
+a vision LLM call, so this uses LLM credits and can take minutes.`, `Scan still running — the dataset updates
+when it finishes`, `Backlog scan failed —`, `Doorbell diagnostics failed —`, `Couldn't save —`,
+`Rename failed —`. Since Phase 3 every key is translated in all 22 language files
+(`frontend/i18n-missing.json` reports nothing missing); `npm run i18n:keys` lists the code's keys, which are
+authoritative over this list.
+
 Not translated (technical / backend prose): entity ids, platform names, tier names and details, verdicts,
 `image_source` values, categories, summaries, timestamps, numbers.
 
@@ -614,10 +641,10 @@ Not translated (technical / backend prose): entity ids, platform names, tier nam
 
 | old feature | where it was | why not here |
 |---|---|---|
-| **Camera coverage** — `jarvis/compute_camera_coverage` | Settings › Floor Plan editor, "Compute coverage" button: for each placed camera on the current floor the client computed geometric candidates (`_computeCoverage` ray-casts the camera's FOV cone against the plan's walls/openings) and sent `{type: "jarvis/compute_camera_coverage", camera: {entity: string, room: string, fov: number (deg, default 90), range_ft: number, indoor: boolean, candidates: {[room: string]: number /*0..1 fraction in view*/}, openings: string[]}}` → `{covered: string[] /*rooms the LLM/geometry confirms*/, reason: string, source: "llm" \| "geometry", ts: number /*epoch s*/}` (error `coverage_failed`; `candidates` empty ⇒ `{covered: [], reason: "Nothing in view.", source: "geometry"}`), stored the result as `coverage` on the camera entry and saved everything with `jarvis/update_config {key: "floor_plan_cameras", value: JSON string}` (`{[floor: string]: {id, x, y, angle, fov, range, entity, indoor, coverage?}[]}`). | The candidates come from the plan geometry, i.e. the editor the Residence spec (§8) deferred to Phase 3; without the editor there is no input to send. Not used anywhere else by the old panel. A read-only "sees: …" line per camera from `data.config.floor_plan_cameras[*][].coverage` is a possible Phase 3 nicety. |
-| Faces card snapshots (`jarvis/camera_snapshot` for face thumbnails, "Snapshot now" reference photos, `jarvis/faces`, `jarvis/face_reference`) | Memory › Household Faces | the Faces feature is Phase 3 (docs/panel.md); this view only uses `camera_snapshot` for the tile |
-| Diagnostics card's other service buttons (`jarvis.test_tts`, `observer_status`, `briefing`, `test_notify`, `test_routing`) | Settings › Diagnostics | not camera-related; Phase 3 per settings.md §7 |
-| Camera placement / FOV cones on the floor plan | Floor Plan editor | editor feature (residence.md §8) |
+| **Camera coverage** — `jarvis/compute_camera_coverage` (now in the floor-plan editor's Cameras & pins tab, editor.md §2.6) | Settings › Floor Plan editor, "Compute coverage" button: for each placed camera on the current floor the client computed geometric candidates (`_computeCoverage` ray-casts the camera's FOV cone against the plan's walls/openings) and sent `{type: "jarvis/compute_camera_coverage", camera: {entity: string, room: string, fov: number (deg, default 90), range_ft: number, indoor: boolean, candidates: {[room: string]: number /*0..1 fraction in view*/}, openings: string[]}}` → `{covered: string[] /*rooms the LLM/geometry confirms*/, reason: string, source: "llm" \| "geometry", ts: number /*epoch s*/}` (error `coverage_failed`; `candidates` empty ⇒ `{covered: [], reason: "Nothing in view.", source: "geometry"}`), stored the result as `coverage` on the camera entry and saved everything with `jarvis/update_config {key: "floor_plan_cameras", value: JSON string}` (`{[floor: string]: {id, x, y, angle, fov, range, entity, indoor, coverage?}[]}`). | The candidates come from the plan geometry, i.e. the editor the Residence spec (§8) deferred to Phase 3; without the editor there is no input to send. Not used anywhere else by the old panel. A read-only "sees: …" line per camera from `data.config.floor_plan_cameras[*][].coverage` is a possible Phase 3 nicety. |
+| Faces card snapshots (`jarvis/camera_snapshot` for face thumbnails, "Snapshot now" reference photos, `jarvis/faces`, `jarvis/face_reference`) | Memory › Household Faces | ported in Phase 3 to the People view (people.md); this view only uses `camera_snapshot` for the tile |
+| Diagnostics card's other service buttons (`jarvis.test_tts`, `observer_status`, `briefing`, `test_notify`, `test_routing`) | Settings › Diagnostics | not camera-related; ported in Phase 3 as Settings tool cards (settings-tools.md) |
+| Camera placement / FOV cones on the floor plan | Floor Plan editor | the floor-plan editor (`/jarvis/residence/editor/pins`, editor.md) |
 | Catalogue keys (`camera_auto_analyze`, `camera_alert_level`, `recognition_source`, `identity_min_confidence`, `disabled_cameras` as a list editor, `indoor_entities`, `outdoor_entities`, …) as editable fields | Settings cards | Settings view owns every catalogue key; this view links (§3.2.3) and only writes `disabled_cameras` through the per-camera switches |
 | `access_token`-based proxy URLs (`?token=`) | old tile | the smoke test and the design rule require signed `/api/` paths; `auth/sign_path` replaces them |
 | HUD chrome: `◉ LIVE`, `◱`, upper-cased 18-char chip labels, vignette, scanlines, `TARGET … [87%]` monospace strip styling, chip text `— no cameras —` | old tile | design mandate |
@@ -627,11 +654,12 @@ Not translated (technical / backend prose): entity ids, platform names, tier nam
 
 ## 8. Risks / ambiguities
 
-* **R1 — registry edit.** `src/views/index.ts` is scaffold-owned; adding the view is a two-line change
-  (import + `VIEWS` entry) and the only acceptable shared edit. The smoke test asserts `tabs.length >= 7`
-  and unique keys, so an eighth tab passes; the bottom nav already handles "icon-only except current" below
-  520 px, but eight items at 360 px (≈45 px each) should be eyeballed in the harness. `tests/unit/test_ws_contract.py`
-  requires every `jarvis/…` literal in `frontend/src` to be a registered command — all five used here are.
+* **R1 — registry edit.** Done: `src/views/index.ts` imports the view and lists it third in `VIEWS`. The
+  smoke test asserts the exact tab order (ten tabs) and that the narrow bottom nav shows four
+  `PRIMARY_NAV` items plus "More", whose sheet lists Cameras with the other secondary views.
+  `tests/unit/test_ws_contract.py` requires every `jarvis/…` literal in `frontend/src` to be a registered
+  command — all five used here (`camera_snapshot`, `camera_diagnostics`, `rename_camera`, `camera_location`,
+  `update_config`) are.
 * **R2 — signed query parameters.** HA signs the query string (`async_sign_path` stores `params` in the JWT;
   only `width`/`height` are exempt). A cache-buster appended *after* signing invalidates the signature (401
   → the chain would wrongly escalate to tier 3 for every camera). Put `?_=<ts>` inside the path you sign
@@ -640,18 +668,14 @@ Not translated (technical / backend prose): entity ids, platform names, tier nam
 * **R3 — MJPEG under jsdom / harness.** The harness never loads images; the 6 s watchdog fires after the
   smoke test moved on, and `canvas.getContext` returns `null` there (luma `null` ⇒ no escalation). Timers must
   be cleared on disconnect or jsdom reports open handles; never let a timer callback throw.
-* **R4 — fixture mismatch.** `dev/fixtures/panel_data.json` (shared) has `config.cameras[]` without
+* **R4 — fixture mismatch.** `dev/fixtures/panel_data.json` (shared) still has `config.cameras[]` without
   `enabled`, a `location_mode: "manual"` that does not exist, `camera_overrides: {"camera.kitchen": "indoor"}`
-  (the value must be a camera entity id), `disabled_cameras: null` and `doorbell_training.recent: []`. Tolerate
-  all of it (treat missing `enabled` as `true`, unknown `location_mode` as `"auto"`, an override whose target
-  is not in `hass.states` as none) and add minimal realistic values (one disabled camera, `camera_overrides:
-  {"camera.front_door": "camera.front_door_restream"}` only if that entity is also added to `mock-hass.ts`
-  states — otherwise leave overrides empty, two `recent` events). `mock-hass.ts` has only
-  `camera.front_door` in `states`; the other two fixture cameras will show "Unavailable in Home Assistant" in
-  the harness, which is the correct behaviour, not a bug. Add `jarvis_camera_snapshot.json` (`{"image": null}`
-  — a base64 JPEG would bloat the fixture; `null` exercises the "No frame" state) and
-  `jarvis_camera_diagnostics.json` (a realistic `{summary, platforms, probe}` with a `nest` platform and
-  mixed OK/failed tiers).
+  (the value must be a camera entity id) and `disabled_cameras: null`; `doorbell_training` now carries stats
+  and `recent` events. The view tolerates all of it (missing `enabled` = `true`, unknown `location_mode` =
+  `"auto"`, an override whose target is not a camera entity in `hass.states` = none). `mock-hass.ts` has
+  only `camera.front_door` in `states`; the other two fixture cameras show "Unavailable in Home Assistant" in
+  the harness, which is the correct behaviour, not a bug. `jarvis_camera_snapshot.json` (`{"image": null}`,
+  exercising the "No frame" state) and `jarvis_camera_diagnostics.json` (`{summary, platforms, probe}`) exist.
 * **R5 — `train_doorbell_backlog` is blocking.** `hass.callService` resolves only when the scan ends
   (minutes for `limit` 500). Keep the button disabled with `Scanning…`, never queue a second call, and do not
   show a spinner that spins (DESIGN §5). HA may surface a WS timeout for very long calls — treat a rejection
@@ -678,8 +702,7 @@ Not translated (technical / backend prose): entity ids, platform names, tier nam
 * **R12 — `name` vs `camera_names`.** `Camera.name` already applies the custom name; the text field's
   *value* must come from `camera_names[entity_id]` (so it is empty when no custom name is set) and its
   *placeholder* from `raw_name`. Confusing the two writes the HA name into the map on the first blur.
-* **R13 — an eighth bottom-nav item** also pushes the Settings tab further right on phones; if the scaffold
-  owner prefers, `cameras` could sit after `logs` — the spec places it before `logs` only to keep operational
-  views together. Either order is fine for this view.
+* **R13 — nav placement.** Settled: `cameras` sits after `intrusion` in the tab bar; the narrow bottom nav
+  carries only Overview, Intrusion, Residence and Settings, so Cameras lives in the "More" sheet on phones.
 * **R14 — Logs link.** "check Logs for the result" uses `navigate("logs")`; the Logs view's CAMERA category
   chip is data-driven, so there is no sub-path to pass.

@@ -98,7 +98,6 @@ export class JarvisViewLogs extends JarvisView {
     super.connectedCallback();
     watchDefinitions(this, ["ha-icon"]);
     document.addEventListener("visibilitychange", this._onVisibility);
-    this.addEventListener("jv-logs-enforcement-changed", this._onEnforcementChanged);
     this._timer = setInterval(() => {
       if (document.visibilityState === "visible") void this._poll();
     }, POLL_MS);
@@ -108,7 +107,6 @@ export class JarvisViewLogs extends JarvisView {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     document.removeEventListener("visibilitychange", this._onVisibility);
-    this.removeEventListener("jv-logs-enforcement-changed", this._onEnforcementChanged);
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
   }
@@ -121,9 +119,6 @@ export class JarvisViewLogs extends JarvisView {
     if (document.visibilityState === "visible" && Date.now() - this._lastFetch > POLL_MS) void this._poll();
   };
 
-  private _onEnforcementChanged = (): void => {
-    void this._loadEnforcement();
-  };
 
   // ── data ──────────────────────────────────────────────────────────────────
 

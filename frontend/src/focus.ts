@@ -11,6 +11,12 @@
  * stable key attribute read BEFORE the removal (never by index), in the
  * control's own shadow root; focus is read through every open shadow root.
  *
+ * A removal that answers later (a websocket write: the list re-renders from
+ * the reply, or its controls are disabled while it saves) returns its
+ * Promise: focus is placed once that has settled, success or failure, so the
+ * neighbouring row's control is enabled again by then and a row that came
+ * back after a failed write gets its own control back.
+ *
  * Focus only moves when the activated control had it, and never away from
  * somewhere else the user has gone in the meantime. A mouse click in a
  * browser that does not focus buttons changes nothing; where it does, the
@@ -24,8 +30,31 @@ export function deepActiveElement(): Element | null {
   return a;
 }
 
+/**
+ * The element inside `el` that really takes focus: the first tabbable element at or under `el`,
+ * searching open shadow roots before light children, else the first host that delegates focus.
+ * HA's own wrappers (ha-selector > ha-selector-entity > ha-entity-picker) neither delegate nor
+ * forward focus(), and the picker they end in delegates to a host whose button sits one shadow root
+ * deeper still - so the tabbable element itself is what gets focus.
+ */
+export function focusableWithin(el: Element): HTMLElement | null {
+  let delegate: HTMLElement | null = null;
+  const walk = (node: Element, depth: number): HTMLElement | null => {
+    if (depth > 16 || !(node instanceof HTMLElement)) return null;
+    if (node.matches(":disabled") || (node as HTMLElement & { disabled?: boolean }).disabled === true || node.hidden) return null;
+    if (node.tabIndex >= 0 && !node.shadowRoot?.delegatesFocus) return node;
+    if (node.shadowRoot?.delegatesFocus) delegate ??= node;
+    for (const kid of [...(node.shadowRoot?.children ?? []), ...node.children]) {
+      const hit = walk(kid, depth + 1);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(el, 0) ?? delegate;
+}
+
 /** `node` is `ancestor` or inside it, crossing shadow roots (an ha-icon-button's inner button counts). */
-function within(node: Node | null, ancestor: Node): boolean {
+export function within(node: Node | null, ancestor: Node): boolean {
   for (let n: Node | null = node; n; n = n.parentNode ?? (n instanceof ShadowRoot ? n.host : null)) {
     if (n === ancestor) return true;
   }
@@ -52,22 +81,32 @@ async function settled(host: FocusHost): Promise<void> {
 }
 
 /**
- * Run `remove` (the activated control's action) and, once `host` has
- * re-rendered, give focus to `pick()` if focus was on the control and has
- * fallen to <body> since. `pick` returning null leaves focus alone.
+ * What a pick hands back: the element to focus, a function that focuses
+ * something itself (`canvas.focusSurface()`, which keeps the scroll position),
+ * or null to leave focus alone.
  */
-export function keepFocus(e: Event, host: FocusHost, remove: () => unknown, pick: () => Element | null): void {
+export type FocusTarget = Element | (() => void) | null;
+
+/**
+ * Run `remove` (the activated control's action) and, once it has settled
+ * (when it returns a Promise) and `host` has re-rendered, give focus to
+ * `pick()` if focus was on the control and has fallen to <body> since.
+ */
+export function keepFocus(e: Event, host: FocusHost, remove: () => unknown, pick: () => FocusTarget): void {
   const from = e.currentTarget instanceof Element ? e.currentTarget : null;
   const had = !!from && within(deepActiveElement(), from);
-  remove();
+  const done = remove();
   if (!had) return;
-  void settled(host).then(() => {
+  const place = () => {
     const now = deepActiveElement();
     // still on the control (nothing was removed, or Lit reused the element) or somewhere the user went since
     if (now && now !== document.body && now.isConnected) return;
-    const el = pick();
-    if (usable(el)) el.focus();
-  });
+    const target = pick();
+    if (typeof target === "function") target();
+    else if (usable(target)) target.focus();
+  };
+  // finally: a rejected removal still places focus, and its rejection is still reported
+  void Promise.resolve(done).finally(() => settled(host).then(place));
 }
 
 export interface RowFocus {
@@ -83,9 +122,11 @@ export interface RowFocus {
 
 /**
  * `keepFocus()` for a list row's Remove: call it from the control's click
- * handler with the removal as `remove`. The neighbours' keys are read now;
- * after the render the first of [next rows ..., previous rows nearest first]
- * that still exists and has a usable `control` gets focus, else `fallback`.
+ * handler with the removal as `remove` (return its Promise when it answers
+ * later). The keys are read now; after the render the first of [the row
+ * itself (back after a failed write), next rows ..., previous rows nearest
+ * first] that still exists and has a usable `control` gets focus, else
+ * `fallback`.
  */
 export function keepRowFocus(e: Event, host: FocusHost, spec: RowFocus, remove: () => unknown): void {
   const from = e.currentTarget instanceof Element ? e.currentTarget : null;
@@ -94,7 +135,7 @@ export function keepRowFocus(e: Event, host: FocusHost, spec: RowFocus, remove: 
   const peers = row?.parentElement ? [...row.parentElement.children].filter((el) => el.matches(spec.row)) : [];
   const at = row ? peers.indexOf(row) : -1;
   const keyOf = (el: Element) => el.getAttribute(spec.key);
-  const keys = at < 0 ? [] : [...peers.slice(at + 1), ...peers.slice(0, at).reverse()].map(keyOf).filter((k): k is string => k != null);
+  const keys = at < 0 ? [] : [...peers.slice(at), ...peers.slice(0, at).reverse()].map(keyOf).filter((k): k is string => k != null);
   const controls = typeof spec.control === "string" ? [spec.control] : spec.control;
   keepFocus(e, host, remove, () => {
     if (!(root instanceof ShadowRoot || root instanceof Document)) return null;

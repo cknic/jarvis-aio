@@ -8,6 +8,10 @@ The view agent should not need the old file; everything it does is recorded here
 Route: `/jarvis/intrusion` (panel `route.path === "/intrusion"`). Admin-only (the whole panel is
 `require_admin=True`), so every admin-gated branch below is always available.
 
+Implementation: `<jarvis-view-intrusion>` (`src/views/intrusion.ts`) with `src/views/intrusion/`:
+`settings.ts` (`<jv-intrusion-settings>`, the four settings), `log.ts` (`<jv-intrusion-log>`, Card 2),
+`snapshot.ts` (`<jv-intrusion-snapshot>`, a signed still with its full-size dialog) and `shared.ts`.
+
 ---
 
 ## Purpose
@@ -26,7 +30,8 @@ log, learning). Live investigation state: `cognitive_core.intrusion_status()` an
 
 ## Data
 
-All commands go through `hass.callWS`. Every `ts` field is **epoch seconds** (not ms): multiply
+All commands go through the panel's `ws()` helper (`this.ws` / `ws(hass, …)` from `src/ws.ts`, which
+wraps `hass.callWS` and rejects with a `WsError {code, message}`). Every `ts` field is **epoch seconds** (not ms): multiply
 by 1000 before `new Date()`. Format dates with the HA locale (`hass.locale`), never
 `toLocaleString()` bare.
 
@@ -228,19 +233,20 @@ placeholder).
 
 The old intrusion tab called **no** `hass.callService`. None are needed.
 
-### D6. Optional live refresh (not in the old tab)
+### D6. Live refresh (not in the old tab)
 
 The backend fires HA bus events `jarvis_intrusion_confirmed` and `jarvis_intrusion_unresolved`
-with `{reason, snapshot_url, snapshot_path, camera}`. The view MAY
-`hass.connection.subscribeEvents(cb, "jarvis_intrusion_confirmed")` (and `_unresolved`) to
-re-fetch status + log immediately. Otherwise refresh as below.
+with `{reason, snapshot_url, snapshot_path, camera}`. The view subscribes to both
+(`hass.connection.subscribeEvents(cb, type)`, once, when `hass` first arrives; unsubscribed on
+disconnect) and on either event re-reads `status`, reloads the log and asks the shell for a new
+snapshot (`refresh()`). Polling (below) still covers everything else.
 
 ### Fetch / refresh schedule
 
 | data | when |
 |---|---|
-| `intrusion status` | on view connect; after `dismiss`; after `acknowledge`; on every 20 s panel-snapshot tick while the view is visible (the old panel only did connect + after actions; adding the tick is the improvement that makes `suppressed_for` count down). |
-| `intrusion log` | on view connect; on the Refresh button; after every `label` call (old behaviour: full re-fetch; the new view may instead patch the one event from the `label` response and replace `learning` from it — avoids re-signing every image). |
+| `intrusion status` | when `hass` first arrives; after `dismiss`; after `acknowledge`; on a bus event (D6); on every new panel snapshot (the shell's 20 s tick), at most once per 5 s, silently (a failed silent re-read keeps the last status). Between reads the card counts `suppressed_for` down locally once a second. |
+| `intrusion log` | on view connect; on the Refresh button; after a call-off; on a bus event; after every `label` call the one event is patched from the `label` response and `learning` replaced from it (no full re-fetch, so images are not re-signed). |
 | `get_panel_data` (`intrusion`, `lockdown`, `config`) | provided by the shell's 20 s poll; also re-request right after a successful `update_config`. |
 | `auth/sign_path` | each time an image element is (re)rendered with an unsigned `/api/` path. |
 
@@ -250,9 +256,9 @@ re-fetch status + log immediately. Otherwise refresh as below.
 
 Two-column on wide screens (≥ 1024 px: status card left ~⅓, log right ~⅔), single column stacked
 on narrow/mobile with the **Status card first** (its call-off/hold buttons are the thing a person
-reaching for their phone during an alert needs). Use HA card surfaces (`ha-card`) and theme tokens
-only; no custom colours beyond semantic state colours (`--error-color`, `--warning-color`,
-`--success-color`, `--primary-color`, `--secondary-text-color`).
+reaching for their phone during an alert needs). Cards are `<jv-section>` (HA card surfaces); colours
+only through the `--jv-*` tokens (DESIGN.md), state chips via `<jv-state-badge>` (`danger` / `warn` /
+`ok` / `neutral`).
 
 ### Card 1 — "Intrusion" (status + response)
 
@@ -272,18 +278,20 @@ Body, top to bottom:
    lockdown (that lives in the shell header / `jarvis/set_lockdown {on: bool}`); link to it only.
 3. **Acknowledged banner** (when `status.acknowledged`): "Acknowledged — automatic escalation held
    (you're handling it)".
-4. **Last snapshot**: when `status.last_snapshot?.url` — the signed image (max-height ~280 px,
-   `object-fit: contain`, rounded) with caption `{camera friendly name} · {time}`. Camera friendly
+4. **Last snapshot**: when `status.last_snapshot?.url` — else the newest log event that carries a
+   `snapshot_url` (R1: `last_snapshot` is in-memory and empty after a restart) — the signed image
+   (max-height ~280 px, `object-fit: contain`, rounded; tap opens it full size) with caption
+   `{camera friendly name} · {time}`. Camera friendly
    name: `hass.states[camera]?.attributes.friendly_name` else strip `camera.` and replace `_` with
    spaces. Else the empty hint: "No intrusion snapshots captured. This stays empty unless JARVIS
    confirms an intruder on camera."
 5. **False-alarm count** (when `false_alarms_24h > 0`): "{n} false alarm(s) called off in the last 24h".
 6. **Response buttons** (row, wrap on mobile; primary = Call off):
-   - `CALL OFF (FALSE ALARM)` — destructive/warning styled (`mwc-button` / `ha-button` with
-     `--mdc-theme-primary: var(--warning-color)` or outlined).
-   - `I'M LOOKING (HOLD)` — secondary.
+   - `CALL OFF (FALSE ALARM)` — destructive styled (`.jv-btn` danger), **confirmed first** (A1).
+   - `I'M LOOKING` — secondary (the key `I'M LOOKING (HOLD)` does not exist; see Strings).
    Both always enabled (parity: the backend accepts them even with no active investigation — a
    call-off then just arms the 10-min quiet window). Disabled only while a request is in flight.
+   The last action's toast text is also shown in a `role="status"` line under the buttons for 5 s.
 7. **Settings** (a sub-section with a thin divider, heading "Response settings"):
    - Select "Auto-escalate if no response after" → `intrusion_response_timeout` (options above).
    - Switch "Confirm Frigate person with JARVIS vision before alarming" → `intrusion_vision_confirm`.
@@ -291,7 +299,8 @@ Body, top to bottom:
      stay ever-vigilant and alert on any unanswered activity" → `intrusion_vision_veto`.
    - Switch "Require confinement (Lockdown or armed alarm) for intrusion monitoring" →
      `intrusion_requires_confinement`.
-   Use `ha-switch` + `ha-formfield` / `ha-select`. Switch state = `config[key] !== false` for the
+   Rendered as a `<fieldset>` with legend "Response settings"; `ha-switch` + `ha-formfield` /
+   `ha-select` when defined, native fallbacks otherwise. Switch state = `config[key] !== false` for the
    two vision keys (default true) and `config[key] === true` for confinement (default false),
    matching the old panel's defaults when the key is absent.
 
@@ -319,12 +328,12 @@ Event list (most recent first; backend order already), each row:
 - optional small extras (secondary text): zones joined by ", "; `max_depth` as "depth {n}".
 - snapshot thumbnail when `snapshot_url` (signed; ~120 px tall on desktop, full-width on mobile;
   tap opens full-size in an `ha-dialog`; hide on `onerror`).
-- actions: segmented pair `REAL` / `FALSE ALARM` (pressed state = current `label`), plus `CLEAR`
-  only when a label is set. Clicking the already-selected label is a no-op (or acts as clear — pick
-  no-op for parity).
+- actions: segmented pair `REAL` / `FALSE ALARM` (`role="group"` "Label this event", pressed state =
+  current `label`), plus `Clear label` only when a label is set, and `labelled {time}` once
+  `labeled_ts` exists. Clicking the already-selected label is a no-op.
 
-Pagination: the old tab showed a flat list of 40. Keep `limit: 40`; optionally a "Show more"
-that re-requests with `limit: 200`.
+Pagination: the old tab showed a flat list of 40. `limit: 40`; a "Show more" text button (shown when
+the list is full, i.e. `events.length >= limit`, and `limit < 200`) re-requests with `limit: 200`.
 
 Mobile: both cards full-width; log rows become a stacked layout (chip + time, text, image, buttons
 full-width). Status card's two response buttons stretch to full width, stacked.
@@ -335,13 +344,13 @@ full-width). Status card's two response buttons stretch to full width, stacked.
 
 | # | trigger | call | confirm? | success | failure |
 |---|---|---|---|---|---|
-| A1 | `CALL OFF (FALSE ALARM)` click | `callWS {type:"jarvis/intrusion", action:"dismiss", reason:"panel"}` | No (parity). Button disabled while pending. | toast "intrusion called off"; replace status from the response (it already includes `status()`); request a snapshot refresh so `intrusion.active` flips. | toast "✗ {message}"; re-enable button |
-| A2 | `I'M LOOKING (HOLD)` click | `callWS {type:"jarvis/intrusion", action:"acknowledge", reason:"panel"}` | No | toast "acknowledged — holding escalation"; status from response | toast error; re-enable |
+| A1 | `CALL OFF (FALSE ALARM)` click | `{type:"jarvis/intrusion", action:"dismiss", reason:"panel"}` | **Yes** (`confirmDialog`, destructive): heading "Call off this intrusion as a false alarm?", message "Escalation stays quiet for 10 minutes and the event is recorded as a false alarm.", confirm "CALL OFF (FALSE ALARM)". Button disabled while pending. | toast "Intrusion called off"; replace status from the response (it already includes `status()`); request a snapshot refresh so `intrusion.active` flips; reload the log. | toast with the error message; re-enable button |
+| A2 | `I'M LOOKING` click | `{type:"jarvis/intrusion", action:"acknowledge", reason:"panel"}` | No | toast "Acknowledged — holding escalation"; status from response | toast error; re-enable |
 | A3 | Refresh icon in log header | `callWS {type:"jarvis/intrusion", action:"log", limit:40}` | No | list re-rendered, images re-signed | inline error state in list (see States) |
-| A4 | `REAL` click on event | `callWS {type:"jarvis/intrusion", action:"label", event_id, label:"real"}` | No | if `res.ok`: set event.label, replace `learning`, update header count + damped banner; else toast `res.error` | toast error (old panel swallowed errors silently — do better) |
+| A4 | `REAL` click on event | `{type:"jarvis/intrusion", action:"label", event_id, label:"real"}` | No | if `res.ok`: set event.label, replace `learning`, update header count + damped banner; else toast `res.error` (or "Could not save the label") | toast error (old panel swallowed errors silently — do better) |
 | A5 | `FALSE ALARM` click | same with `label:"false"` | No | as A4 | as A4 |
-| A6 | `CLEAR` click | same with `label:""` | No | as A4 (label → null) | as A4 |
-| A7 | timeout select change | `callWS {type:"jarvis/update_config", key:"intrusion_response_timeout", value:<Number>}` | No | toast "intrusion_response_timeout → 120" (old text) or nicer "Saved"; update local config | toast "✗ intrusion_response_timeout — {message}"; revert control |
+| A6 | `Clear label` click | same with `label:""` | No | as A4 (label → null) | as A4 |
+| A7 | timeout select change | `{type:"jarvis/update_config", key:"intrusion_response_timeout", value:<Number>}` | No | optimistic; toast "Saved"; local value from the echo; `jarvis-refresh` | toast "intrusion_response_timeout — {message}"; revert control |
 | A8 | vision-confirm switch | `update_config {key:"intrusion_vision_confirm", value:<bool>}` | No | as A7 | as A7 |
 | A9 | vision-veto switch | `update_config {key:"intrusion_vision_veto", value:<bool>}` | No | as A7 | as A7 |
 | A10 | requires-confinement switch | `update_config {key:"intrusion_requires_confinement", value:<bool>}` | No | as A7 | as A7 |
@@ -390,9 +399,9 @@ Checked against `de.json`, `fr.json`, `es.json`.
 | `CALLED OFF` | ✗ | chip prefix; render as `${t("CALLED OFF")} · ${n}s` |
 | `REAL` | ✓ (fr, es) | label button |
 | `FALSE ALARM` | ✓ (fr, es) | label button |
-| `CLEAR` | ✓ — but de "Frei" / fr "Dégagé" are the *"area is clear"* sense, wrong for "remove label" | consider a new key `Clear label` instead (falls back to English until translated) |
+| `CLEAR` | ✓ — but de "Frei" / fr "Dégagé" are the *"area is clear"* sense, wrong for "remove label" | not used: the view uses the new key `Clear label` |
 | `CALL OFF (FALSE ALARM)` | ✓ (fr, es) | button; old panel prefixed "✕ " outside the key |
-| `I'M LOOKING (HOLD)` | ✗ — only `I'M LOOKING` ✓ exists | use key `I'M LOOKING` and append ` (${t("HOLD")})`? Simpler: use `I'M LOOKING` alone as the button text. |
+| `I'M LOOKING (HOLD)` | ✗ — only `I'M LOOKING` ✓ exists | the view uses `I'M LOOKING` alone as the button text |
 | `Auto-escalate if no response after` | ✓ (fr) | select label |
 | `Confirm Frigate person with JARVIS vision before alarming` | ✓ | switch label |
 | `Stay silent when JARVIS's own cameras clearly show no one (recommended) — turn OFF to stay ever-vigilant and alert on any unanswered activity` | ✗ | switch label (new key) |
@@ -411,8 +420,10 @@ Checked against `de.json`, `fr.json`, `es.json`.
 | `Last intrusion snapshot and false-alarm call-off` | ✓ (prefix only) | card 1 sub-text begins with it; full old sentence: `Last intrusion snapshot and false-alarm call-off. When JARVIS confirms an intruder on camera it grabs a still; if it's not real, call it off here or say "it's a false alarm".` — use the full sentence as the key (new) |
 | `Every intrusion event with its snapshot. Mark each one real or false alarm — JARVIS learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.` | ✗ | card 2 sub-text (old markup bolded "real"/"false alarm") |
 | `activity` | ✗ | fallback for an event with neither breach nor camera |
-| `intrusion called off` | ✗ | toast (old: "✓ intrusion called off") |
-| `acknowledged — holding escalation` | ✗ | toast |
+| `Intrusion called off` | ✗ | toast (old: "✓ intrusion called off") |
+| `Acknowledged — holding escalation` | ✗ | toast |
+| `Call off this intrusion as a false alarm?` / `Escalation stays quiet for 10 minutes and the event is recorded as a false alarm.` | ✗ | A1 confirm dialog |
+| `Saved` / `Could not save the label` / `Label this event` / `labelled {time}` / `depth {n}` / `Open snapshot` / `Intrusion snapshot` / `just now` / `{n} min ago` / `{n} h ago` / `{n} d ago` / `Unknown error` | ✗ | used by the code (toasts, labels, relative times) |
 | `Breach` | ✗ | new (active-investigation line) |
 | `Lockdown engaged since` / `Lockdown engaged automatically since` | ✗ | new |
 | `Response settings` | ✗ | new sub-heading |
@@ -421,9 +432,10 @@ Checked against `de.json`, `fr.json`, `es.json`.
 | `Show more` | ✗ | new, optional |
 | `intrusion snapshot` / `snapshot` | ✗ | img alt text |
 
-Interpolation: the i18n files have no placeholder convention for panel strings (the README's
-`{curly}` rule is for notifications), so keep count-bearing strings as whole keys with `{n}` and
-substitute after `t()`. Do not translate entity ids, camera names, or numbers.
+Interpolation: `t(key, vars)` substitutes `{name}` placeholders after the lookup, so count-bearing
+strings stay whole keys with `{n}`. Do not translate entity ids, camera names, or numbers. Since
+Phase 3 every key is translated in all 22 language files (`frontend/i18n-missing.json`); the ✓/✗
+column records the state before the port.
 
 ---
 
@@ -443,9 +455,9 @@ substitute after `t()`. Do not translate entity ids, camera names, or numbers.
 ## Risks
 
 1. **`last_snapshot`, `called_off`, `acknowledged`, `false_alarms_24h` are in-memory module state** —
-   they reset on HA restart while the log (`intrusion_log.json`) persists. The status card can say
-   "no snapshot" while the log shows one from an hour ago. Consider falling back to the newest
-   `events[i].snapshot_url` for the hero image when `last_snapshot` is null.
+   they reset on HA restart while the log (`intrusion_log.json`) persists. The view therefore falls
+   back to the newest `events[i].snapshot_url` (reported by the log card when it loads) for the hero
+   image when `last_snapshot` is null.
 2. **Snapshot files are pruned at 40, the log at 200** → many older `snapshot_url`s 404. Handle
    `onerror`. The 404 arrives only after the signed GET, so there is no way to know in advance.
 3. **Signed URLs expire in 300 s**; a long-open view with stale `src` values will break images

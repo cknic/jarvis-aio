@@ -136,13 +136,21 @@ row, the narrow bottom nav and its More sheet, back button, keyboard,
 failure), walks every Settings section for its tool cards and field editors,
 saves one edit through the voice-confirm list and the biometrics map (exactly
 that key is written, with the expected value), fails when the bundle defines
-a `jarvis-editor-*` / `jarvis-tool-*` element the run never asserts, walks
+a `jarvis-editor-*` / `jarvis-tool-*` element no check that ran saw render, walks
 every floor-plan editor tab in light and dark, and runs an editor round trip
 through `EditorStore` (add a room, undo, redo, save exactly
-`floor_plan_rooms`, reload the saved snapshot without a conflict), and checks
-that a row's Remove in the editor lists and the Settings list editors leaves
-keyboard focus on the next / previous row (or the list's fallback), not
-`<body>`. It also
+`floor_plan_rooms`, reload the saved snapshot without a conflict), writes
+backgrounds one floor per message (a plan file's images keep the background
+card busy - an open align tool is cancelled first, a second Import JSON is
+ignored - and report a partial or total failure by floor), checks that
+overlapping writes of one immediate-save key revert only to a confirmed value,
+sizes the narrow
+editor canvas from the fitted plan (its grid fills a letterboxed svg), and
+checks that a row's Remove in the editor lists and the Settings list editors
+leaves keyboard focus on the next / previous row (or the list's fallback), not
+`<body>` - also against a backend that answers late or fails (Doors, Muted
+Announcements) - and that a focused toast does not auto-dismiss (until a
+re-render strips its focused Undo). It also
 bundles and runs the editor model self-test and checks that every `jarvis/…`
 / `config/…` command literal in `src/` has a `dev/fixtures/` file, that no
 fixture is orphaned, and that every call during the run hit a fixture.

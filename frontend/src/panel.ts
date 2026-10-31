@@ -173,6 +173,12 @@ class JarvisPanel extends LitElement {
       :host([narrow]) .ver {
         display: none;
       }
+      /* below 380 px the mark is what gives way, so the name never truncates */
+      @media (max-width: 379px) {
+        :host([narrow]) .logo {
+          display: none;
+        }
+      }
       .spacer {
         flex: 1 1 auto;
       }

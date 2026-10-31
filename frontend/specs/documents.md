@@ -11,9 +11,12 @@ backend: `custom_components/jarvis/websocket.py` (`ws_documents` ~line 2885, `ws
 this view from this document alone; it never needs the old panel.
 
 Route: `/jarvis/documents` (tab id `documents`, tab label **Documents**, element
-`jarvis-view-documents`, icon suggestion `mdi:file-document-multiple-outline`). Admin-only like
-the whole panel. This is a **new tab**: the old panel had no Documents tab (the card sat inside
-Settings). Registering it in `src/views/index.ts` is a one-line scaffold change (see §9.1).
+`jarvis-view-documents`, icon `mdi:file-document-multiple-outline`). Admin-only like the whole
+panel. This is a **new tab**: the old panel had no Documents tab (the card sat inside Settings). It
+is registered in `src/views/index.ts` after `memory` (before `residence`); on narrow it is in the
+bottom nav's "More" sheet. Files: `src/views/documents.ts` (+ `src/views/documents/`:
+`search-card.ts` `<jarvis-docs-search>`, `memory-card.ts` `<jarvis-docs-memory>`, `query-form.ts`,
+`clamp.ts`, `alerts.ts`, `rich.ts`, `format.ts`, `styles.ts`, `types.ts`).
 
 Related specs: `settings.md` §2.6 (the same two commands in one table row each, superseded by
 §2 below where they differ), §5.5 (the "not yet ported" row this view closes), §7 risk 12
@@ -43,9 +46,10 @@ Give the household's paperwork a home and show what JARVIS can retrieve from it:
 
 The settings behind the feature (`semantic_search`, `embed_model`, `embed_base_url`,
 `document_watch_folders`, and the fallback Ollama host `llm_base_url`) stay in **Settings**; this
-view links to them (§2.5) and never writes them through `jarvis/update_config`. The only setting
-this view changes is `semantic_search`, indirectly, through `jarvis/semantic_search enable/disable`
-(the backend writes it).
+view links to them (§2.3). The only setting this view changes is `semantic_search`, through the
+purpose-built command alone: Enable is `jarvis/semantic_search enable` (writes it through
+`config_apply.async_apply_many`, initialises the vector store and probes Ollama), Disable is
+`jarvis/semantic_search disable` (§4 A7/A8). Neither sends `jarvis/update_config`.
 
 Nothing on this view comes from `jarvis/get_panel_data` except `config.memory_stats` (§2.4);
 in particular the snapshot does **not** carry `document_watch_folders` or `semantic_search`
@@ -340,9 +344,9 @@ The effective engine for the badge: `enabled && vector_count > 0` → semantic i
 `!enabled` → keyword.
 
 #### 2.2.2 `action: "enable"`
-Server: writes `semantic_search = true` through `jarvis_config.set` (directly, **not** via
-`update_config`, so no Settings-side refresh event), creates the `doc_vectors` table, then probes.
-The setting stays `true` even when the probe fails.
+Server: writes `semantic_search = true` through `config_apply.async_apply_many` (runtime_config +
+config.json + config-changed signal, the same path as `jarvis/update_config`), creates the
+`doc_vectors` table, then probes. The setting stays `true` even when the probe fails.
 ```ts
 { ok: true;  model: string; base: string; dim: number; enabled: true }          // Ollama answered (dim e.g. 768)
 { ok: false; model: string; base: string; error: string; enabled: true }        // enabled, Ollama not ready
@@ -357,18 +361,20 @@ Existing documents have **no vectors** until re-indexed: after a successful enab
 offer **Ingest folder** (§4 A2) prominently.
 
 #### 2.2.3 `action: "disable"`
-Writes `semantic_search = false`. Vectors are kept. → `{ enabled: false; ok: true }`.
+Writes `semantic_search = false` (also through `config_apply.async_apply_many`). Vectors are kept.
+→ `{ enabled: false; ok: true }`. Called by A8 (the response is not read: the view re-reads
+`status`).
 
 #### 2.2.4 `action: "test"`
 Probe only, no write: `{ ok: true; model; base; dim }` | `{ ok: false; model; base; error }` |
 `{ ok: false; error: "no Ollama base URL configured …" }`. Works whether or not semantic search is
 enabled (so the user can check Ollama before enabling).
 
-### 2.3 Settings this view reads indirectly and links to (never writes)
+### 2.3 Settings this view reads indirectly and links to (writes only `semantic_search`)
 
 | key | kind | default | category (Settings route) | used by |
 |---|---|---|---|---|
-| `semantic_search` | bool | `false` | `learning` | `embeddings.is_enabled()`; toggled by §2.2.2/§2.2.3 |
+| `semantic_search` | bool | `false` | `learning` | `embeddings.is_enabled()`; written by A7 / A8 (`jarvis/semantic_search enable` / `disable`) |
 | `embed_model` | str | `"nomic-embed-text"` | `learning` | model name in probes/ingest |
 | `embed_base_url` | str | `""` | `learning` | Ollama host override for embeddings |
 | `document_watch_folders` | str (newline- or comma-separated paths; a JSON list is also accepted by the backend) | `""` | `learning` | `scan_watch` and the 10-minute tick |
@@ -416,7 +422,8 @@ show the empty hint instead of the search box (§5). Show the score as a percent
 
 ### 2.5 Not used
 
-* `hass.callService`: none. `jarvis/update_config`: none (all setting edits go to Settings).
+* `hass.callService`: none. `jarvis/update_config`: none (A7 / A8 write `semantic_search` through
+  `jarvis/semantic_search`); every other setting edit goes to Settings.
 * `jarvis/get_panel_data`: only `config.memory_stats` (§2.4). The view does **not** call
   `refresh()` after mutations — nothing on the snapshot changes.
 
@@ -542,7 +549,7 @@ everything visual (tokens only, 44 px targets, no spinners — use the `loading`
 | A4 | Delete | row icon button | `jarvis/documents {action:"delete", filename: source}` | **yes** — `confirmDialog({heading: t("Delete {name}?", {name}), message: t("This removes the file from the documents folder and everything JARVIS indexed from it."), confirmLabel: t("Delete"), destructive: true})` | banner *Deleted {filename}*; re-`status` | `ok:false` → *Couldn't delete {name}: {error}*; thrown → *Delete failed — {message}*. Leave the row in place on failure |
 | A5 | Search documents | **Search** / Enter | `jarvis/documents {action:"search", query}` | none | results list (3.2) | inline `<ha-alert error>` in the card: *Search failed — {message}* + **Retry** |
 | A6 | Clear search | clear control / empty submit | — | — | back to idle copy | — |
-| A7 | Enable semantic search | button | `jarvis/semantic_search {action:"enable"}` | none | `ok` → alert `success` *Semantic search is on ({model}, {dim}-dimensional). Run Ingest folder to embed your documents.* with an inline **Ingest folder** button; re-`status` (3.3) | `ok:false` → alert `warning` *Semantic search is on, but Ollama isn't ready: {error}* (it IS enabled now — re-`status` shows the warn badge); thrown → *Couldn't enable semantic search — {message}* |
+| A7 | Enable semantic search | button | `jarvis/semantic_search {action:"enable"}` (writes the setting, vector store + probe) | none | `ok` → alert `success` *Semantic search is on ({model}, {dim}-dimensional). Run Ingest folder to embed your documents.* with an inline **Ingest folder** button; re-`status` (3.3) | `ok:false` → alert `warning` *Semantic search is on, but Ollama isn't ready: {error}* (it IS enabled now — re-`status` shows the warn badge); thrown → *Couldn't enable semantic search — {message}* |
 | A8 | Disable semantic search | button | `jarvis/semantic_search {action:"disable"}` | none (not destructive: vectors are kept) | alert `info` *Semantic search is off — keyword search is active.*; re-`status` (3.3) | thrown → *Couldn't disable semantic search — {message}* |
 | A9 | Test connection | button | `jarvis/semantic_search {action:"test"}` | none | alert `success` *Ollama answered: {model}, {dim}-dimensional vectors.* | `ok:false` → alert `warning` *Ollama is not ready: {error}*; thrown → *Test failed — {message}* |
 | A10 | Search conversations | **Search** / Enter (3.4) | `jarvis/search_memory {query, k: 8}` | none | results list (3.4) | inline alert *Search failed — {message}* + **Retry** |
@@ -588,6 +595,8 @@ Other states:
 ---
 
 ## 6. Strings
+
+**Phase 3 status:** every panel key is now translated in all 22 language files (`frontend/i18n-missing.json` reports nothing missing; `npm run i18n:report` regenerates it). The de.json / ✓ / ✗ columns below record what existed before the port; the code's `t()` keys (`npm run i18n:keys`) are authoritative where they differ from this list.
 
 Pass every user-visible string through `t()`; keys are the exact English strings below.
 Checked against `custom_components/jarvis/frontend/i18n/de.json` (337 keys): the old card's
@@ -752,10 +761,11 @@ mount.
    re-indexed) every search answers `engine: "keyword"`; the warn badge + inline Ingest button in
    3.3 exist for this. Likewise `disable` keeps the vectors, so `vector_count` stays > 0 while
    `enabled` is false — the badge logic in §2.2.1 handles it.
-9. **Two editors for `semantic_search`.** Settings → Learning has the switch (writes via
-   `update_config`), this view has Enable/Disable (backend writes via `jarvis_config.set`). Neither
-   notifies the other; the Settings view re-reads `config_schema` on its own schedule. Acceptable,
-   but re-fetch `semantic_search status` on `visibilitychange` so this view at least catches up.
+9. **Two editors for `semantic_search`.** Settings → Learning has the switch and this view has
+   Enable/Disable; the switch writes through `jarvis/update_config`, the buttons through
+   `jarvis/semantic_search enable|disable`, and both land in `config_apply` (runtime_config +
+   config.json + config-changed signal), so the stored value agrees. Neither view pushes to the other; the Settings view re-reads `config_schema` on its own
+   schedule, and this view re-fetches `semantic_search status` on `visibilitychange`.
 10. **Connection-loss rejections do not look like a backend error.** When the socket drops (which
     an oversized upload causes) home-assistant-js-websocket rejects every pending call with
     `ERR_CONNECTION_LOST` (= 3): older releases reject with the bare number, current ones with
@@ -785,15 +795,12 @@ mount.
     literal from `frontend/src` and requires it to be registered and present in the committed
     bundle. Write the three command names as plain string literals (they are all registered);
     do not build them dynamically, and rebuild the bundle before handing over.
-18. **The tab itself.** `src/views/index.ts` is scaffold-owned; the view is unreachable until
-    `{ key: "documents", title: "Documents", icon: "mdi:file-document-multiple-outline", element: "jarvis-view-documents" }`
-    is added there (after `memory` is the natural position). docs/panel.md ("Not yet ported": "the
-    document library and the semantic-search probe") and settings.md §5.5 row "Document Library"
-    should be updated by whoever owns them once this view lands; Settings → Learning's "Not yet
-    ported" list should then link here instead.
+18. **The tab itself.** Done: `src/views/index.ts` registers `{ key: "documents", title:
+    "Documents", icon: "mdi:file-document-multiple-outline", element: "jarvis-view-documents" }` after
+    `memory`. Settings → Learning's "Elsewhere in the panel" card links here ("Document Library").
 
 ### 9.1 Ownership
 
 The view agent owns `src/views/documents.ts`, `src/views/documents/**` and the three fixtures in
-§8. It does not edit `src/views/index.ts` (request the one-line registration in §9.18),
+§8. It does not edit `src/views/index.ts` (the registration of §9.18 is in place),
 `src/components/*`, `src/theme/*`, the i18n dictionaries, or `websocket.py`.
